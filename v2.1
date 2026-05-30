@@ -1,0 +1,2694 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
+local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
+local LucideIcons = {
+    home = "🏠", menu = "☰", search = "🔍", settings = "⚙️",
+    ["chevron-down"] = "▼", ["chevron-up"] = "▲", ["chevron-left"] = "◀", ["chevron-right"] = "▶",
+    ["arrow-left"] = "←", ["arrow-right"] = "→", ["arrow-up"] = "↑", ["arrow-down"] = "↓",
+    plus = "+", minus = "−", x = "✕", check = "✓",
+    edit = "✏️", trash = "🗑️", copy = "📋", save = "💾",
+    download = "⬇️", upload = "⬆️", refresh = "🔄", rotate = "↻",
+    play = "▶", pause = "⏸", stop = "⏹", skip = "⏭",
+    volume = "🔊", ["volume-x"] = "🔇", mic = "🎤", camera = "📷",
+    mail = "✉️", send = "📤", bell = "🔔", ["bell-off"] = "🔕",
+    message = "💬", phone = "📱", video = "📹",
+    file = "📄", folder = "📁", image = "🖼️", code = "💻",
+    terminal = "⌨️", database = "🗄️", archive = "📦",
+    user = "👤", users = "👥", ["user-plus"] = "👤+", ["user-x"] = "👤✕",
+    lock = "🔒", unlock = "🔓", shield = "🛡️", key = "🔑",
+    eye = "👁️", ["eye-off"] = "🚫",
+    sword = "⚔️", target = "🎯", zap = "⚡", flame = "🔥",
+    star = "⭐", heart = "❤️", crown = "👑", trophy = "🏆",
+    gem = "💎", rocket = "🚀", ghost = "👻", skull = "💀",
+    bomb = "💣", wand = "🪄", gamepad = "🎮", dice = "🎲",
+    info = "ℹ️", alert = "⚠️", ["alert-circle"] = "⚠️",
+    ["check-circle"] = "✅", ["x-circle"] = "❌",
+    loader = "⏳", clock = "🕐", timer = "⏱️",
+    sun = "☀️", moon = "🌙", cloud = "☁️", rainbow = "🌈",
+    snowflake = "❄️", leaf = "🍃", tree = "🌲",
+    map = "🗺️", compass = "🧭", flag = "🚩", bookmark = "🔖",
+    tag = "🏷️", gift = "🎁", palette = "🎨", brush = "🖌️",
+    wrench = "🔧", hammer = "🔨", bolt = "🔩",
+    circle = "●", square = "■", triangle = "▲", hexagon = "⬡",
+    sparkles = "✨", lightning = "⚡", fire = "🔥", water = "💧",
+    wind = "💨", earth = "🌍", infinity = "∞", hash = "#",
+    at = "@", poop = "💩", cool = "😎", magic = "🪄",
+}
+local function GetIcon(iconName)
+    if not iconName then return "" end
+    if LucideIcons[iconName] then
+        return LucideIcons[iconName]
+    end
+    if string.find(iconName, "rbxassetid://") or string.find(iconName, "rbxasset://") or string.find(iconName, "customasset://") or string.find(iconName, "getcustomasset:") then
+        return nil 
+    end
+    return "•" 
+end
+local function IsAssetId(str)
+    if not str then return false end
+    return string.find(str, "rbxassetid://") ~= nil or string.find(str, "rbxasset://") ~= nil or string.find(str, "customasset://") ~= nil or string.find(str, "getcustomasset:") ~= nil
+end
+local function ParseSVG(svgString)
+    local nodes = {}
+    svgString = svgString:gsub("<!%-%-.-%-%->", "") 
+    for tag, attrsStr in svgString:gmatch("<([%w%-]+)%s*([^>]*)/?>") do
+        if tag ~= "svg" then
+            local attrs = {}
+            for name, val in attrsStr:gmatch("([%w%-]+)=[\"']([^\"']*)[\"']") do
+                attrs[name] = val
+            end
+            table.insert(nodes, {tag = tag, attrs = attrs})
+        end
+    end
+    return nodes
+end
+local Converter = {}
+local band   = bit32.band
+local bxor   = bit32.bxor
+local bnot   = bit32.bnot
+local rshift = bit32.rshift
+local _crc = {}
+for i = 0, 255 do
+    local c = i
+    for _ = 1, 8 do
+        if band(c, 1) == 1 then c = bxor(0xEDB88320, rshift(c, 1))
+        else c = rshift(c, 1) end
+    end
+    _crc[i] = c
+end
+local function crc32(s)
+    local c = 0xFFFFFFFF
+    for i = 1, #s do
+        c = bxor(_crc[band(bxor(c, s:byte(i)), 0xFF)], rshift(c, 8))
+    end
+    return bxor(c, 0xFFFFFFFF)
+end
+local function u32(n)
+    n = band(n, 0xFFFFFFFF)
+    return string.char(band(rshift(n,24),0xFF), band(rshift(n,16),0xFF), band(rshift(n,8),0xFF), band(n,0xFF))
+end
+local function u16le(n)
+    return string.char(band(n, 0xFF), band(rshift(n, 8), 0xFF))
+end
+local function pngChunk(t, d)
+    return u32(#d) .. t .. d .. u32(crc32(t .. d))
+end
+local function adler32(s)
+    local a, b = 1, 0
+    for i = 1, #s do
+        a = (a + s:byte(i)) % 65521
+        b = (b + a) % 65521
+    end
+    return u32(b * 65536 + a)
+end
+local function encodePNG(pixels, w, h)
+    local rows = {}
+    for y = 0, h - 1 do
+        local row = {"\x00"}
+        for x = 0, w - 1 do
+            local i = (y * w + x) * 4 + 1
+            row[#row + 1] = string.char(
+                math.max(0, math.min(255, pixels[i])),
+                math.max(0, math.min(255, pixels[i+1])),
+                math.max(0, math.min(255, pixels[i+2])),
+                math.max(0, math.min(255, pixels[i+3]))
+            )
+        end
+        rows[#rows + 1] = table.concat(row)
+    end
+    local raw  = table.concat(rows)
+    local len  = #raw
+    local nlen = band(bnot(len), 0xFFFF)
+    local idat = "\x78\x01\x01" .. u16le(len) .. u16le(nlen) .. raw .. adler32(raw)
+    return "\x89PNG\r\n\x1a\n"
+        .. pngChunk("IHDR", u32(w) .. u32(h) .. "\x08\x06\x00\x00\x00")
+        .. pngChunk("IDAT", idat)
+        .. pngChunk("IEND", "")
+end
+local function parseColor(s)
+    if not s or s == "" or s == "currentColor" then return 255, 255, 255 end
+    if s:sub(1,1) == "#" then
+        local h = s:sub(2)
+        if #h == 3 then
+            local r = tonumber(h:sub(1,1), 16)
+            local g = tonumber(h:sub(2,2), 16)
+            local b = tonumber(h:sub(3,3), 16)
+            return r*17, g*17, b*17
+        elseif #h == 6 then
+            return tonumber(h:sub(1,2),16), tonumber(h:sub(3,4),16), tonumber(h:sub(5,6),16)
+        end
+    end
+    local named = { white={255,255,255}, black={0,0,0}, red={255,0,0}, blue={0,0,255}, green={0,128,0} }
+    local c = named[s]
+    if c then return c[1], c[2], c[3] end
+    return 255, 255, 255
+end
+local function distSeg(px, py, ax, ay, bx, by)
+    local dx, dy = bx-ax, by-ay
+    local lsq = dx*dx + dy*dy
+    if lsq < 1e-10 then return math.sqrt((px-ax)^2 + (py-ay)^2) end
+    local t = math.max(0, math.min(1, ((px-ax)*dx + (py-ay)*dy) / lsq))
+    return math.sqrt((px-ax-t*dx)^2 + (py-ay-t*dy)^2)
+end
+local function strokePolyline(pixels, w, pts, hw, r, g, b)
+    local aa = 0.75
+    for k = 1, #pts - 1 do
+        local ax, ay = pts[k][1], pts[k][2]
+        local bx, by = pts[k+1][1], pts[k+1][2]
+        local mg  = hw + aa + 1
+        local x0  = math.max(0,   math.floor(math.min(ax,bx) - mg))
+        local x1  = math.min(w-1, math.ceil (math.max(ax,bx) + mg))
+        local y0  = math.max(0,   math.floor(math.min(ay,by) - mg))
+        local y1  = math.min(w-1, math.ceil (math.max(ay,by) + mg))
+        for py = y0, y1 do
+            for px = x0, x1 do
+                local d   = distSeg(px+0.5, py+0.5, ax, ay, bx, by)
+                local cov = math.max(0, math.min(1, (hw + aa - d) / (aa * 2)))
+                if cov > 0 then
+                    local i  = (py * w + px) * 4 + 1
+                    local ia = 1 - cov
+                    pixels[i]   = math.floor(pixels[i]   * ia + r * cov + 0.5)
+                    pixels[i+1] = math.floor(pixels[i+1] * ia + g * cov + 0.5)
+                    pixels[i+2] = math.floor(pixels[i+2] * ia + b * cov + 0.5)
+                    pixels[i+3] = math.min(255, math.floor(pixels[i+3] + (255 - pixels[i+3]) * cov + 0.5))
+                end
+            end
+        end
+    end
+end
+local function parseNums(s)
+    local t = {}
+    for n in s:gmatch("[+-]?%d*%.?%d+[eE]?[+-]?%d*") do
+        t[#t+1] = tonumber(n)
+    end
+    return t
+end
+local function parsePath(d, scale)
+    d = d:gsub("([Aa])%s*([^MmLlHhVvCcSsQqTtAaZz]*)", function(cmd, args)
+        local cleaned = args
+        for _ = 1, 3 do 
+            cleaned = cleaned:gsub("([01])([01])", "%1 %2")
+        end
+        return cmd .. cleaned
+    end)
+    local subpaths = {}
+    local cur      = {}
+    local cx, cy   = 0, 0
+    local sx, sy   = 0, 0
+    local lcpx, lcpy = 0, 0
+    local function addPt(x, y)
+        cur[#cur+1] = {x * scale, y * scale}
+        cx, cy = x, y
+    end
+    local function flush()
+        if #cur > 0 then subpaths[#subpaths+1] = cur; cur = {} end
+    end
+    local function cubicSample(px, py, x1, y1, x2, y2, x3, y3)
+        for i = 1, 24 do
+            local t = i/24; local mt = 1-t
+            addPt(mt^3*px + 3*mt^2*t*x1 + 3*mt*t^2*x2 + t^3*x3,
+                  mt^3*py + 3*mt^2*t*y1 + 3*mt*t^2*y2 + t^3*y3)
+        end
+    end
+    local function quadSample(px, py, x1, y1, x2, y2)
+        for i = 1, 16 do
+            local t = i/16; local mt = 1-t
+            addPt(mt^2*px + 2*mt*t*x1 + t^2*x2, mt^2*py + 2*mt*t*y1 + t^2*y2)
+        end
+    end
+    local function arcSample(ax, ay, rx, ry, xrot, la, sw, ex, ey)
+        if (ax == ex and ay == ey) or rx == 0 or ry == 0 then addPt(ex, ey); return end
+        local phi = math.rad(xrot)
+        local cp, sp = math.cos(phi), math.sin(phi)
+        local dx, dy = (ax-ex)/2, (ay-ey)/2
+        local x1r = cp*dx + sp*dy; local y1r = -sp*dx + cp*dy
+        rx, ry = math.abs(rx), math.abs(ry)
+        local lam = (x1r/rx)^2 + (y1r/ry)^2
+        if lam > 1 then lam = math.sqrt(lam); rx = lam*rx; ry = lam*ry end
+        local num = math.max(0, (rx*ry)^2 - (rx*y1r)^2 - (ry*x1r)^2)
+        local den = (rx*y1r)^2 + (ry*x1r)^2
+        local k   = math.sqrt(num / math.max(den, 1e-10))
+        if la == sw then k = -k end
+        local cxr = k*rx*y1r/ry; local cyr = -k*ry*x1r/rx
+        local mcx = cp*cxr - sp*cyr + (ax+ex)/2
+        local mcy = sp*cxr + cp*cyr + (ay+ey)/2
+        local function ang(ux, uy, vx, vy)
+            local dot = ux*vx + uy*vy
+            local len = math.sqrt((ux^2+uy^2) * (vx^2+vy^2))
+            local a   = math.acos(math.max(-1, math.min(1, dot / math.max(len, 1e-10))))
+            return (ux*vy - uy*vx < 0) and -a or a
+        end
+        local ux = (x1r-cxr)/rx; local uy = (y1r-cyr)/ry
+        local vx = (-x1r-cxr)/rx; local vy = (-y1r-cyr)/ry
+        local th1 = ang(1, 0, ux, uy)
+        local dth = ang(ux, uy, vx, vy)
+        if sw == 0 and dth > 0 then dth = dth - 2*math.pi
+        elseif sw == 1 and dth < 0 then dth = dth + 2*math.pi end
+        local steps = math.max(8, math.ceil(math.abs(dth) * 12))
+        for i = 1, steps do
+            local th = th1 + i/steps * dth
+            addPt(cp*rx*math.cos(th) - sp*ry*math.sin(th) + mcx,
+                  sp*rx*math.cos(th) + cp*ry*math.sin(th) + mcy)
+        end
+    end
+    for cmd, raw in d:gmatch("([MmLlHhVvCcSsQqTtAaZz])([^MmLlHhVvCcSsQqTtAaZz]*)") do
+        local a  = parseNums(raw)
+        local n  = #a
+        local ai = 1
+        local function nxt() local v = a[ai] or 0; ai = ai+1; return v end
+        if cmd == "M" then
+            flush()
+            local nx, ny = nxt(), nxt(); cx, cy = nx, ny; sx, sy = cx, cy
+            cur[#cur+1] = {cx*scale, cy*scale}
+            lcpx, lcpy = cx, cy 
+            while ai <= n do
+                local px, py = nxt(), nxt(); addPt(px, py)
+            end
+        elseif cmd == "m" then
+            flush()
+            local rx, ry = nxt(), nxt(); cx, cy = cx+rx, cy+ry; sx, sy = cx, cy
+            cur[#cur+1] = {cx*scale, cy*scale}
+            lcpx, lcpy = cx, cy 
+            while ai <= n do
+                local rx2, ry2 = nxt(), nxt(); addPt(cx+rx2, cy+ry2)
+            end
+        elseif cmd == "L" then
+            while ai <= n do local px, py = nxt(), nxt(); addPt(px, py) end
+        elseif cmd == "l" then
+            while ai <= n do local rx, ry = nxt(), nxt(); addPt(cx+rx, cy+ry) end
+        elseif cmd == "H" then
+            while ai <= n do addPt(nxt(), cy) end
+        elseif cmd == "h" then
+            while ai <= n do addPt(cx + nxt(), cy) end
+        elseif cmd == "V" then
+            while ai <= n do addPt(cx, nxt()) end
+        elseif cmd == "v" then
+            while ai <= n do addPt(cx, cy + nxt()) end
+        elseif cmd == "C" then
+            while ai <= n do
+                local px, py = cx, cy
+                local r1,r2,r3,r4,r5,r6 = nxt(),nxt(),nxt(),nxt(),nxt(),nxt()
+                lcpx, lcpy = r3, r4
+                cubicSample(px,py, r1,r2, r3,r4, r5,r6)
+            end
+        elseif cmd == "c" then
+            while ai <= n do
+                local px, py = cx, cy
+                local r1,r2,r3,r4,r5,r6 = nxt(),nxt(),nxt(),nxt(),nxt(),nxt()
+                lcpx, lcpy = px+r3, py+r4
+                cubicSample(px,py, px+r1,py+r2, px+r3,py+r4, px+r5,py+r6)
+            end
+        elseif cmd == "S" then
+            while ai <= n do
+                local px, py = cx, cy
+                local r1,r2,r3,r4 = nxt(),nxt(),nxt(),nxt()
+                local rx1, ry1 = 2*cx-lcpx, 2*cy-lcpy
+                lcpx, lcpy = r1, r2
+                cubicSample(px,py, rx1,ry1, r1,r2, r3,r4)
+            end
+        elseif cmd == "s" then
+            while ai <= n do
+                local px, py = cx, cy
+                local r1,r2,r3,r4 = nxt(),nxt(),nxt(),nxt()
+                local rx1, ry1 = 2*cx-lcpx, 2*cy-lcpy
+                lcpx, lcpy = px+r1, py+r2
+                cubicSample(px,py, rx1,ry1, px+r1,py+r2, px+r3,py+r4)
+            end
+        elseif cmd == "Q" then
+            while ai <= n do
+                local px, py = cx, cy
+                local r1,r2,r3,r4 = nxt(),nxt(),nxt(),nxt()
+                lcpx, lcpy = r1, r2
+                quadSample(px,py, r1,r2, r3,r4)
+            end
+        elseif cmd == "q" then
+            while ai <= n do
+                local px, py = cx, cy
+                local r1,r2,r3,r4 = nxt(),nxt(),nxt(),nxt()
+                lcpx, lcpy = px+r1, py+r2
+                quadSample(px,py, px+r1,py+r2, px+r3,py+r4)
+            end
+        elseif cmd == "t" then
+            while ai <= n do
+                local px, py = cx, cy
+                local r1, r2 = nxt(), nxt()
+                local rx1, ry1 = 2*cx-lcpx, 2*cy-lcpy
+                lcpx, lcpy = rx1, ry1
+                quadSample(px,py, rx1,ry1, px+r1,py+r2)
+            end
+        elseif cmd == "A" then
+            while ai <= n do
+                local rx,ry = nxt(),nxt(); local xr = nxt()
+                local la,sw = nxt(),nxt(); local ex,ey = nxt(),nxt()
+                arcSample(cx,cy, rx,ry, xr, la,sw, ex,ey)
+            end
+        elseif cmd == "a" then
+            while ai <= n do
+                local rx,ry = nxt(),nxt(); local xr = nxt()
+                local la,sw = nxt(),nxt(); local rx2,ry2 = nxt(),nxt()
+                arcSample(cx,cy, rx,ry, xr, la,sw, cx+rx2,cy+ry2)
+            end
+        elseif cmd == "Z" or cmd == "z" then
+            addPt(sx, sy); flush(); cx, cy = sx, sy
+        end
+    end
+    flush()
+    return subpaths
+end
+function Converter.toPNG(iconNode, opts)
+    opts = opts or {}
+    local size  = math.floor(opts.size or 64)
+    local scale = size / 24
+    local hw    = (opts.stroke_width or 2) * scale / 2
+    local r, g, b = parseColor(opts.color)
+    local pixels = {}
+    for i = 1, size * size * 4 do pixels[i] = 0 end
+    for _, el in ipairs(iconNode) do
+        local tag   = el.tag
+        local attrs = el.attrs
+        if tag == "path" then
+            for _, pts in ipairs(parsePath(attrs.d or "", scale)) do
+                strokePolyline(pixels, size, pts, hw, r, g, b)
+			end
+        elseif tag == "circle" then
+            local cx  = (tonumber(attrs.cx) or 0) * scale
+            local cy  = (tonumber(attrs.cy) or 0) * scale
+            local rad = (tonumber(attrs.r)  or 0) * scale
+            local aa  = 0.75; local mg = rad + hw + aa + 1
+            for py = math.max(0, math.floor(cy-mg)), math.min(size-1, math.ceil(cy+mg)) do
+                for px = math.max(0, math.floor(cx-mg)), math.min(size-1, math.ceil(cx+mg)) do
+                    local d   = math.abs(math.sqrt((px+0.5-cx)^2 + (py+0.5-cy)^2) - rad)
+                    local cov = math.max(0, math.min(1, (hw + aa - d) / (aa * 2)))
+                    if cov > 0 then
+                        local i  = (py * size + px) * 4 + 1; local ia = 1 - cov
+                        pixels[i]   = math.floor(pixels[i]   * ia + r * cov + 0.5)
+                        pixels[i+1] = math.floor(pixels[i+1] * ia + g * cov + 0.5)
+                        pixels[i+2] = math.floor(pixels[i+2] * ia + b * cov + 0.5)
+                        pixels[i+3] = math.min(255, math.floor(pixels[i+3] + (255-pixels[i+3]) * cov + 0.5))
+					end
+				end
+			end
+        elseif tag == "ellipse" then
+            local ecx = (tonumber(attrs.cx) or 0) * scale
+            local ecy = (tonumber(attrs.cy) or 0) * scale
+            local erx = (tonumber(attrs.rx) or 0) * scale
+            local ery = (tonumber(attrs.ry) or 0) * scale
+            local pts = {}
+            for i = 0, 64 do
+                local th = i/64 * 2 * math.pi
+                pts[#pts+1] = {ecx + erx*math.cos(th), ecy + ery*math.sin(th)}
+            end
+            strokePolyline(pixels, size, pts, hw, r, g, b)
+        elseif tag == "line" then
+            local lx1 = (tonumber(attrs.x1) or 0) * scale
+            local ly1 = (tonumber(attrs.y1) or 0) * scale
+            local lx2 = (tonumber(attrs.x2) or 0) * scale
+            local ly2 = (tonumber(attrs.y2) or 0) * scale
+            strokePolyline(pixels, size, {{lx1,ly1},{lx2,ly2}}, hw, r, g, b)
+        elseif tag == "rect" then
+            local x = (tonumber(attrs.x)       or 0) * scale
+            local y = (tonumber(attrs.y)       or 0) * scale
+            local rw = (tonumber(attrs.width)  or 0) * scale
+            local rh = (tonumber(attrs.height) or 0) * scale
+            local rx_radius = (tonumber(attrs.rx) or tonumber(attrs.ry) or 0) * scale
+            local ry_radius = (tonumber(attrs.ry) or tonumber(attrs.rx) or 0) * scale
+            if rx_radius > 0 or ry_radius > 0 then
+                local rxr = math.min(rx_radius, rw / 2)
+                local ryr = math.min(ry_radius, rh / 2)
+                local pts = {}
+                table.insert(pts, {x + rxr, y})
+                table.insert(pts, {x + rw - rxr, y})
+                for i = 1, 8 do
+                    local th = -math.pi/2 + (i/8)*(math.pi/2)
+                    table.insert(pts, {x + rw - rxr + rxr*math.cos(th), y + ryr + ryr*math.sin(th)})
+                end
+                table.insert(pts, {x + rw, y + rh - ryr})
+                for i = 1, 8 do
+                    local th = (i/8)*(math.pi/2)
+                    table.insert(pts, {x + rw - rxr + rxr*math.cos(th), y + rh - ryr + ryr*math.sin(th)})
+                end
+                table.insert(pts, {x + rxr, y + rh})
+                for i = 1, 8 do
+                    local th = math.pi/2 + (i/8)*(math.pi/2)
+                    table.insert(pts, {x + rxr + rxr*math.cos(th), y + rh - ryr + ryr*math.sin(th)})
+                end
+                table.insert(pts, {x, y + ryr})
+                for i = 1, 8 do
+                    local th = math.pi + (i/8)*(math.pi/2)
+                    table.insert(pts, {x + rxr + rxr*math.cos(th), y + ryr + ryr*math.sin(th)})
+                end
+                strokePolyline(pixels, size, pts, hw, r, g, b)
+            else
+                strokePolyline(pixels, size,
+                    {{x,y},{x+rw,y},{x+rw,y+rh},{x,y+rh},{x,y}},
+                    hw, r, g, b)
+            end
+        elseif tag == "polyline" or tag == "polygon" then
+            local pts = {}
+            for nx, ny in (attrs.points or ""):gmatch("([%-%.%d]+)[,%s]+([%-%.%d]+)") do
+                pts[#pts+1] = {tonumber(nx)*scale, tonumber(ny)*scale}
+            end
+            if tag == "polygon" and #pts > 0 then pts[#pts+1] = pts[1] end
+            strokePolyline(pixels, size, pts, hw, r, g, b)
+        end
+    end
+    return encodePNG(pixels, size, size)
+end
+local LucideCache = {}
+local hasWriteFile = (writefile ~= nil) and (getcustomasset ~= nil)
+local function GetLucideIcon(iconName, size)
+    if not iconName or iconName == "" then return nil end
+    local cacheKey = iconName .. "_" .. tostring(size)
+    if LucideCache[cacheKey] then
+        return LucideCache[cacheKey]
+    end
+    if not hasWriteFile then
+        return nil
+    end
+    local folderName = "lucide_cache"
+    local fileName = folderName .. "/" .. cacheKey .. ".png"
+    if makefolder and not isfolder(folderName) then
+        pcall(makefolder, folderName)
+    end
+    if isfile(fileName) then
+        local asset = getcustomasset(fileName)
+        LucideCache[cacheKey] = asset
+        return asset
+    end
+    local url = "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/" .. iconName .. ".svg"
+    local success, svgString = pcall(game.HttpGet, game, url)
+    if success and svgString and svgString:find("<svg") then
+        local successRender, pixels = pcall(function()
+            local nodes = ParseSVG(svgString)
+            return Converter.toPNG(nodes, {
+                size = size,
+                color = "#ffffff", 
+                stroke_width = 2
+            })
+        end)
+        if successRender and pixels then
+            pcall(writefile, fileName, pixels)
+            local asset = getcustomasset(fileName)
+            LucideCache[cacheKey] = asset
+            return asset
+        end
+    end
+    return nil
+end
+local Themes = {
+    DarkTheme = {
+        Name = "Dark",
+        Background = Color3.fromRGB(18, 18, 24),
+        SecondaryBackground = Color3.fromRGB(24, 24, 32),
+        TertiaryBackground = Color3.fromRGB(30, 30, 40),
+        Accent = Color3.fromRGB(88, 101, 242),
+        AccentDark = Color3.fromRGB(71, 82, 196),
+        AccentLight = Color3.fromRGB(114, 127, 255),
+        Text = Color3.fromRGB(240, 240, 250),
+        TextDimmed = Color3.fromRGB(150, 150, 175),
+        TextMuted = Color3.fromRGB(90, 90, 115),
+        Divider = Color3.fromRGB(40, 40, 58),
+        Toggle_On = Color3.fromRGB(80, 200, 140),
+        Toggle_Off = Color3.fromRGB(55, 55, 72),
+        Danger = Color3.fromRGB(240, 60, 70),
+        Success = Color3.fromRGB(80, 200, 140),
+        Warning = Color3.fromRGB(255, 175, 30),
+    },
+    GraphTheme = {
+        Name = "Graph",
+        Background = Color3.fromRGB(12, 12, 18),
+        SecondaryBackground = Color3.fromRGB(18, 18, 26),
+        TertiaryBackground = Color3.fromRGB(24, 24, 34),
+        Accent = Color3.fromRGB(0, 200, 150),
+        AccentDark = Color3.fromRGB(0, 160, 120),
+        AccentLight = Color3.fromRGB(50, 230, 180),
+        Text = Color3.fromRGB(230, 245, 240),
+        TextDimmed = Color3.fromRGB(130, 160, 150),
+        TextMuted = Color3.fromRGB(70, 90, 85),
+        Divider = Color3.fromRGB(30, 40, 38),
+        Toggle_On = Color3.fromRGB(0, 200, 150),
+        Toggle_Off = Color3.fromRGB(40, 50, 48),
+        Danger = Color3.fromRGB(255, 80, 80),
+        Success = Color3.fromRGB(0, 200, 150),
+        Warning = Color3.fromRGB(255, 200, 50),
+    },
+    AmethystTheme = {
+        Name = "Amethyst",
+        Background = Color3.fromRGB(15, 12, 24),
+        SecondaryBackground = Color3.fromRGB(22, 18, 35),
+        TertiaryBackground = Color3.fromRGB(30, 24, 48),
+        Accent = Color3.fromRGB(130, 80, 245),
+        AccentDark = Color3.fromRGB(100, 60, 200),
+        AccentLight = Color3.fromRGB(160, 110, 255),
+        Text = Color3.fromRGB(235, 230, 250),
+        TextDimmed = Color3.fromRGB(155, 140, 185),
+        TextMuted = Color3.fromRGB(90, 80, 120),
+        Divider = Color3.fromRGB(45, 35, 65),
+        Toggle_On = Color3.fromRGB(130, 80, 245),
+        Toggle_Off = Color3.fromRGB(50, 40, 70),
+        Danger = Color3.fromRGB(240, 60, 80),
+        Success = Color3.fromRGB(100, 220, 150),
+        Warning = Color3.fromRGB(255, 180, 50),
+    },
+    MidnightTheme = {
+        Name = "Midnight",
+        Background = Color3.fromRGB(8, 10, 20),
+        SecondaryBackground = Color3.fromRGB(14, 16, 30),
+        TertiaryBackground = Color3.fromRGB(20, 22, 42),
+        Accent = Color3.fromRGB(60, 100, 255),
+        AccentDark = Color3.fromRGB(40, 75, 210),
+        AccentLight = Color3.fromRGB(90, 130, 255),
+        Text = Color3.fromRGB(220, 225, 255),
+        TextDimmed = Color3.fromRGB(120, 130, 180),
+        TextMuted = Color3.fromRGB(60, 70, 110),
+        Divider = Color3.fromRGB(25, 30, 55),
+        Toggle_On = Color3.fromRGB(60, 100, 255),
+        Toggle_Off = Color3.fromRGB(35, 40, 60),
+        Danger = Color3.fromRGB(255, 60, 60),
+        Success = Color3.fromRGB(60, 200, 130),
+        Warning = Color3.fromRGB(255, 170, 40),
+    },
+    CrimsonTheme = {
+        Name = "Crimson",
+        Background = Color3.fromRGB(20, 10, 12),
+        SecondaryBackground = Color3.fromRGB(30, 14, 18),
+        TertiaryBackground = Color3.fromRGB(42, 20, 26),
+        Accent = Color3.fromRGB(220, 40, 60),
+        AccentDark = Color3.fromRGB(180, 30, 50),
+        AccentLight = Color3.fromRGB(255, 70, 90),
+        Text = Color3.fromRGB(255, 235, 238),
+        TextDimmed = Color3.fromRGB(180, 140, 148),
+        TextMuted = Color3.fromRGB(120, 80, 90),
+        Divider = Color3.fromRGB(55, 28, 35),
+        Toggle_On = Color3.fromRGB(220, 40, 60),
+        Toggle_Off = Color3.fromRGB(60, 35, 40),
+        Danger = Color3.fromRGB(255, 40, 40),
+        Success = Color3.fromRGB(80, 200, 120),
+        Warning = Color3.fromRGB(255, 160, 40),
+    },
+    EmeraldTheme = {
+        Name = "Emerald",
+        Background = Color3.fromRGB(10, 20, 15),
+        SecondaryBackground = Color3.fromRGB(14, 28, 20),
+        TertiaryBackground = Color3.fromRGB(20, 38, 28),
+        Accent = Color3.fromRGB(40, 200, 120),
+        AccentDark = Color3.fromRGB(30, 160, 95),
+        AccentLight = Color3.fromRGB(70, 235, 150),
+        Text = Color3.fromRGB(230, 255, 240),
+        TextDimmed = Color3.fromRGB(130, 180, 150),
+        TextMuted = Color3.fromRGB(70, 110, 85),
+        Divider = Color3.fromRGB(28, 50, 38),
+        Toggle_On = Color3.fromRGB(40, 200, 120),
+        Toggle_Off = Color3.fromRGB(30, 50, 38),
+        Danger = Color3.fromRGB(240, 70, 70),
+        Success = Color3.fromRGB(40, 200, 120),
+        Warning = Color3.fromRGB(240, 190, 40),
+    },
+    OceanTheme = {
+        Name = "Ocean",
+        Background = Color3.fromRGB(8, 16, 24),
+        SecondaryBackground = Color3.fromRGB(12, 22, 34),
+        TertiaryBackground = Color3.fromRGB(18, 30, 46),
+        Accent = Color3.fromRGB(30, 160, 220),
+        AccentDark = Color3.fromRGB(20, 130, 185),
+        AccentLight = Color3.fromRGB(60, 190, 250),
+        Text = Color3.fromRGB(220, 240, 255),
+        TextDimmed = Color3.fromRGB(120, 160, 190),
+        TextMuted = Color3.fromRGB(60, 90, 115),
+        Divider = Color3.fromRGB(22, 38, 55),
+        Toggle_On = Color3.fromRGB(30, 160, 220),
+        Toggle_Off = Color3.fromRGB(25, 40, 55),
+        Danger = Color3.fromRGB(255, 70, 70),
+        Success = Color3.fromRGB(50, 210, 150),
+        Warning = Color3.fromRGB(255, 180, 40),
+    },
+    CyberTheme = {
+        Name = "Cyber",
+        Background = Color3.fromRGB(5, 5, 12),
+        SecondaryBackground = Color3.fromRGB(10, 10, 22),
+        TertiaryBackground = Color3.fromRGB(16, 16, 34),
+        Accent = Color3.fromRGB(0, 255, 200),
+        AccentDark = Color3.fromRGB(0, 200, 160),
+        AccentLight = Color3.fromRGB(50, 255, 220),
+        Text = Color3.fromRGB(200, 255, 240),
+        TextDimmed = Color3.fromRGB(100, 180, 160),
+        TextMuted = Color3.fromRGB(50, 100, 90),
+        Divider = Color3.fromRGB(15, 30, 28),
+        Toggle_On = Color3.fromRGB(0, 255, 200),
+        Toggle_Off = Color3.fromRGB(20, 35, 32),
+        Danger = Color3.fromRGB(255, 50, 80),
+        Success = Color3.fromRGB(0, 255, 200),
+        Warning = Color3.fromRGB(255, 255, 50),
+    },
+    NebulaTheme = {
+        Name = "Nebula",
+        Background = Color3.fromRGB(14, 8, 22),
+        SecondaryBackground = Color3.fromRGB(22, 12, 35),
+        TertiaryBackground = Color3.fromRGB(32, 18, 50),
+        Accent = Color3.fromRGB(200, 80, 255),
+        AccentDark = Color3.fromRGB(160, 60, 210),
+        AccentLight = Color3.fromRGB(230, 120, 255),
+        Text = Color3.fromRGB(245, 230, 255),
+        TextDimmed = Color3.fromRGB(170, 140, 200),
+        TextMuted = Color3.fromRGB(100, 75, 130),
+        Divider = Color3.fromRGB(45, 25, 65),
+        Toggle_On = Color3.fromRGB(200, 80, 255),
+        Toggle_Off = Color3.fromRGB(50, 30, 65),
+        Danger = Color3.fromRGB(255, 60, 80),
+        Success = Color3.fromRGB(120, 230, 160),
+        Warning = Color3.fromRGB(255, 180, 60),
+    },
+    ObsidianTheme = {
+        Name = "Obsidian",
+        Background = Color3.fromRGB(12, 12, 12),
+        SecondaryBackground = Color3.fromRGB(18, 18, 18),
+        TertiaryBackground = Color3.fromRGB(26, 26, 26),
+        Accent = Color3.fromRGB(200, 200, 200),
+        AccentDark = Color3.fromRGB(160, 160, 160),
+        AccentLight = Color3.fromRGB(230, 230, 230),
+        Text = Color3.fromRGB(245, 245, 245),
+        TextDimmed = Color3.fromRGB(160, 160, 160),
+        TextMuted = Color3.fromRGB(90, 90, 90),
+        Divider = Color3.fromRGB(38, 38, 38),
+        Toggle_On = Color3.fromRGB(200, 200, 200),
+        Toggle_Off = Color3.fromRGB(50, 50, 50),
+        Danger = Color3.fromRGB(240, 60, 60),
+        Success = Color3.fromRGB(120, 220, 140),
+        Warning = Color3.fromRGB(240, 190, 50),
+    },
+    RoseTheme = {
+        Name = "Rose",
+        Background = Color3.fromRGB(20, 12, 16),
+        SecondaryBackground = Color3.fromRGB(30, 16, 24),
+        TertiaryBackground = Color3.fromRGB(42, 22, 34),
+        Accent = Color3.fromRGB(240, 100, 150),
+        AccentDark = Color3.fromRGB(200, 70, 120),
+        AccentLight = Color3.fromRGB(255, 140, 180),
+        Text = Color3.fromRGB(255, 235, 242),
+        TextDimmed = Color3.fromRGB(200, 150, 170),
+        TextMuted = Color3.fromRGB(130, 85, 105),
+        Divider = Color3.fromRGB(55, 30, 42),
+        Toggle_On = Color3.fromRGB(240, 100, 150),
+        Toggle_Off = Color3.fromRGB(55, 35, 42),
+        Danger = Color3.fromRGB(255, 50, 50),
+        Success = Color3.fromRGB(100, 220, 150),
+        Warning = Color3.fromRGB(255, 180, 60),
+    },
+    ArcticTheme = {
+        Name = "Arctic",
+        Background = Color3.fromRGB(14, 20, 26),
+        SecondaryBackground = Color3.fromRGB(20, 28, 38),
+        TertiaryBackground = Color3.fromRGB(28, 38, 50),
+        Accent = Color3.fromRGB(120, 200, 255),
+        AccentDark = Color3.fromRGB(80, 160, 220),
+        AccentLight = Color3.fromRGB(160, 225, 255),
+        Text = Color3.fromRGB(230, 245, 255),
+        TextDimmed = Color3.fromRGB(140, 175, 200),
+        TextMuted = Color3.fromRGB(75, 100, 125),
+        Divider = Color3.fromRGB(32, 45, 60),
+        Toggle_On = Color3.fromRGB(120, 200, 255),
+        Toggle_Off = Color3.fromRGB(35, 48, 60),
+        Danger = Color3.fromRGB(255, 80, 80),
+        Success = Color3.fromRGB(80, 220, 170),
+        Warning = Color3.fromRGB(255, 200, 60),
+    },
+    SunsetTheme = {
+        Name = "Sunset",
+        Background = Color3.fromRGB(22, 12, 10),
+        SecondaryBackground = Color3.fromRGB(32, 18, 14),
+        TertiaryBackground = Color3.fromRGB(44, 26, 20),
+        Accent = Color3.fromRGB(255, 120, 50),
+        AccentDark = Color3.fromRGB(220, 90, 30),
+        AccentLight = Color3.fromRGB(255, 155, 80),
+        Text = Color3.fromRGB(255, 240, 230),
+        TextDimmed = Color3.fromRGB(200, 160, 140),
+        TextMuted = Color3.fromRGB(130, 95, 80),
+        Divider = Color3.fromRGB(60, 35, 28),
+        Toggle_On = Color3.fromRGB(255, 120, 50),
+        Toggle_Off = Color3.fromRGB(55, 38, 30),
+        Danger = Color3.fromRGB(255, 50, 50),
+        Success = Color3.fromRGB(100, 220, 140),
+        Warning = Color3.fromRGB(255, 200, 40),
+    },
+    RoyalTheme = {
+        Name = "Royal",
+        Background = Color3.fromRGB(10, 10, 25),
+        SecondaryBackground = Color3.fromRGB(16, 16, 38),
+        TertiaryBackground = Color3.fromRGB(24, 22, 52),
+        Accent = Color3.fromRGB(180, 140, 255),
+        AccentDark = Color3.fromRGB(140, 100, 220),
+        AccentLight = Color3.fromRGB(210, 175, 255),
+        Text = Color3.fromRGB(240, 235, 255),
+        TextDimmed = Color3.fromRGB(160, 150, 200),
+        TextMuted = Color3.fromRGB(90, 82, 130),
+        Divider = Color3.fromRGB(35, 30, 60),
+        Toggle_On = Color3.fromRGB(180, 140, 255),
+        Toggle_Off = Color3.fromRGB(40, 35, 60),
+        Danger = Color3.fromRGB(255, 70, 80),
+        Success = Color3.fromRGB(100, 230, 160),
+        Warning = Color3.fromRGB(255, 200, 70),
+    },
+    PhantomTheme = {
+        Name = "Phantom",
+        Background = Color3.fromRGB(8, 8, 10),
+        SecondaryBackground = Color3.fromRGB(14, 14, 18),
+        TertiaryBackground = Color3.fromRGB(22, 22, 28),
+        Accent = Color3.fromRGB(100, 255, 180),
+        AccentDark = Color3.fromRGB(70, 210, 150),
+        AccentLight = Color3.fromRGB(140, 255, 210),
+        Text = Color3.fromRGB(220, 255, 240),
+        TextDimmed = Color3.fromRGB(120, 160, 145),
+        TextMuted = Color3.fromRGB(60, 85, 75),
+        Divider = Color3.fromRGB(22, 28, 26),
+        Toggle_On = Color3.fromRGB(100, 255, 180),
+        Toggle_Off = Color3.fromRGB(28, 35, 32),
+        Danger = Color3.fromRGB(255, 60, 80),
+        Success = Color3.fromRGB(100, 255, 180),
+        Warning = Color3.fromRGB(255, 220, 60),
+    },
+}
+local PoopGUI = {}
+PoopGUI.__index = PoopGUI
+PoopGUI._version = "2.0.0"
+PoopGUI._windows = {}
+PoopGUI._settings = {}
+PoopGUI._settingsFile = "PoopGUI_Settings.json"
+PoopGUI._theme = Themes.DarkTheme  
+PoopGUI._themeName = "DarkTheme"
+PoopGUI.Themes = Themes
+PoopGUI.Icons = LucideIcons
+PoopGUI._connections = {} 
+local function SafeConnect(signal, callback)
+    local connection = signal:Connect(callback)
+    table.insert(PoopGUI._connections, connection)
+    return connection
+end
+local function Create(className, properties, children)
+    local instance = Instance.new(className)
+    for prop, value in pairs(properties or {}) do
+        instance[prop] = value
+    end
+    for _, child in pairs(children or {}) do
+        child.Parent = instance
+    end
+    return instance
+end
+local function Tween(instance, properties, duration, easingStyle, easingDirection)
+    local tween = TweenService:Create(
+        instance,
+        TweenInfo.new(duration or 0.3, easingStyle or Enum.EasingStyle.Quint, easingDirection or Enum.EasingDirection.Out),
+        properties
+    )
+    tween:Play()
+    return tween
+end
+local function AddCorner(parent, radius)
+    return Create("UICorner", {
+        CornerRadius = UDim.new(0, radius or 8),
+        Parent = parent
+    })
+end
+local function AddStroke(parent, color, thickness, transparency)
+    return Create("UIStroke", {
+        Color = color or PoopGUI._theme.Divider,
+        Thickness = thickness or 1,
+        Transparency = transparency or 0.5,
+        Parent = parent
+    })
+end
+local function AddPadding(parent, top, right, bottom, left)
+    return Create("UIPadding", {
+        PaddingTop = UDim.new(0, top or 8),
+        PaddingRight = UDim.new(0, right or 8),
+        PaddingBottom = UDim.new(0, bottom or 8),
+        PaddingLeft = UDim.new(0, left or 8),
+        Parent = parent
+    })
+end
+local function AddShadow(parent)
+    return Create("ImageLabel", {
+        Name = "Shadow",
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://6014261993",
+        ImageColor3 = Color3.fromRGB(0, 0, 0),
+        ImageTransparency = 0.4,
+        ScaleType = Enum.ScaleType.Slice,
+        SliceCenter = Rect.new(49, 49, 450, 450),
+        Size = UDim2.new(1, 40, 1, 40),
+        Position = UDim2.new(0, -20, 0, -14), 
+        ZIndex = -1,
+        Parent = parent
+    })
+end
+local function AddGlow(parent, color, size)
+    return Create("ImageLabel", {
+        Name = "Glow",
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://6014261993",
+        ImageColor3 = color or PoopGUI._theme.Accent,
+        ImageTransparency = 0.85,
+        ScaleType = Enum.ScaleType.Slice,
+        SliceCenter = Rect.new(49, 49, 450, 450),
+        Size = UDim2.new(1, size or 20, 1, size or 20),
+        Position = UDim2.new(0, -(size or 20) / 2, 0, -(size or 20) / 2),
+        ZIndex = -1,
+        Parent = parent
+    })
+end
+local function CreateIconElement(parent, iconName, size, position, color)
+    size = size or UDim2.new(0, 18, 0, 18)
+    position = position or UDim2.new(0, 0, 0, 0)
+    local isAsset = IsAssetId(iconName)
+    local lucideAsset = nil
+    if not isAsset and iconName and iconName ~= "" then
+        lucideAsset = GetLucideIcon(iconName, 64)
+    end
+    if isAsset or lucideAsset then
+        return Create("ImageLabel", {
+            Name = "Icon",
+            BackgroundTransparency = 1,
+            Image = lucideAsset or iconName,
+            ImageColor3 = color or PoopGUI._theme.TextDimmed,
+            Size = size,
+            Position = position,
+            Parent = parent
+        })
+    else
+        local iconText = GetIcon(iconName)
+        return Create("TextLabel", {
+            Name = "Icon",
+            Text = iconText,
+            BackgroundTransparency = 1,
+            TextColor3 = color or PoopGUI._theme.TextDimmed,
+            Font = Enum.Font.GothamBold,
+            TextSize = math.min(size.X.Offset, size.Y.Offset),
+            Size = size,
+            Position = position,
+            Parent = parent
+        })
+    end
+end
+local function MakeDraggable(frame, handle)
+    local dragging, dragInput, dragStart, startPos
+    local dragConnection
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+            if dragConnection then dragConnection:Disconnect() end
+            dragConnection = UserInputService.InputChanged:Connect(function(changedInput)
+                if changedInput == dragInput and dragging then
+                    local delta = changedInput.Position - dragStart
+                    Tween(frame, {
+                        Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                    }, 0.06)
+                end
+            end)
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                    if dragConnection then
+                        dragConnection:Disconnect()
+                        dragConnection = nil
+                    end
+                end
+            end)
+        end
+    end)
+    handle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+end
+local function RippleEffect(button)
+    button.ClipsDescendants = true
+    button.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local ripple = Create("Frame", {
+                Name = "Ripple",
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                BackgroundTransparency = 0.65,
+                BorderSizePixel = 0,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0, input.Position.X - button.AbsolutePosition.X, 0, input.Position.Y - button.AbsolutePosition.Y),
+                Size = UDim2.new(0, 0, 0, 0),
+                Parent = button
+            })
+            AddCorner(ripple, 999)
+            local maxSize = math.max(button.AbsoluteSize.X, button.AbsoluteSize.Y) * 2.5
+            Tween(ripple, {Size = UDim2.new(0, maxSize, 0, maxSize), BackgroundTransparency = 1}, 0.6)
+            task.delay(0.6, function() ripple:Destroy() end)
+        end
+    end)
+end
+local function PulseGlow(glowInstance, minT, maxT, speed)
+    minT = minT or 0.75
+    maxT = maxT or 0.95
+    speed = speed or 1.5
+    task.spawn(function()
+        while glowInstance and glowInstance.Parent do
+            Tween(glowInstance, {ImageTransparency = minT}, speed, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+            task.wait(speed)
+            Tween(glowInstance, {ImageTransparency = maxT}, speed, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+            task.wait(speed)
+        end
+    end)
+end
+local function ShakeEffect(instance, intensity, duration)
+    intensity = intensity or 5
+    duration = duration or 0.3
+    local originalPos = instance.Position
+    task.spawn(function()
+        local elapsed = 0
+        while elapsed < duration do
+            local ox = math.random(-intensity, intensity)
+            local oy = math.random(-intensity, intensity)
+            instance.Position = UDim2.new(originalPos.X.Scale, originalPos.X.Offset + ox, originalPos.Y.Scale, originalPos.Y.Offset + oy)
+            task.wait(0.02)
+            elapsed = elapsed + 0.02
+        end
+        Tween(instance, {Position = originalPos}, 0.15)
+    end)
+end
+function PoopGUI:SetTheme(themeName)
+    if Themes[themeName] then
+        self._theme = Themes[themeName]
+        self._themeName = themeName
+    else
+        warn("[PoopGUI] Theme '" .. tostring(themeName) .. "' not found. Available: " .. table.concat(self:GetThemeNames(), ", "))
+    end
+end
+function PoopGUI:GetThemeNames()
+    local names = {}
+    for name, _ in pairs(Themes) do
+        table.insert(names, name)
+    end
+    table.sort(names)
+    return names
+end
+function PoopGUI:AddCustomTheme(name, themeTable)
+    Themes[name] = themeTable
+end
+function PoopGUI:Notify(title, message, duration, notifType)
+    duration = duration or 3
+    notifType = notifType or "Info"
+    local theme = self._theme
+    local notifColor = theme.Accent
+    if notifType == "Success" then notifColor = theme.Success
+    elseif notifType == "Error" then notifColor = theme.Danger
+    elseif notifType == "Warning" then notifColor = theme.Warning end
+    local screenGui = CoreGui:FindFirstChild("PoopGUI_Notifications")
+    if not screenGui then
+        screenGui = Create("ScreenGui", {
+            Name = "PoopGUI_Notifications",
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+            ResetOnSpawn = false,
+            Parent = CoreGui
+        })
+    end
+    local holder = screenGui:FindFirstChild("Holder")
+    if not holder then
+        holder = Create("Frame", {
+            Name = "Holder",
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 300, 1, 0),
+            Position = UDim2.new(1, -320, 0, 0),
+            Parent = screenGui
+        })
+        Create("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 8),
+            VerticalAlignment = Enum.VerticalAlignment.Bottom,
+            Parent = holder
+        })
+        AddPadding(holder, 0, 0, 20, 0)
+    end
+    local notif = Create("Frame", {
+        Name = "Notification",
+        BackgroundColor3 = theme.SecondaryBackground,
+        Size = UDim2.new(1, 0, 0, 0),
+        ClipsDescendants = true,
+        BackgroundTransparency = 1,
+        Parent = holder
+    })
+    AddCorner(notif, 10)
+    AddStroke(notif, notifColor, 1, 0.3)
+    Create("Frame", {
+        Name = "AccentBar",
+        BackgroundColor3 = notifColor,
+        Size = UDim2.new(0, 3, 1, 0),
+        BorderSizePixel = 0,
+        Parent = notif
+    })
+    local notifGlow = AddGlow(notif, notifColor, 15)
+    notifGlow.ImageTransparency = 1
+    Create("TextLabel", {
+        Name = "Title",
+        Text = title,
+        TextColor3 = theme.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -30, 0, 20),
+        Position = UDim2.new(0, 15, 0, 12),
+        TextTransparency = 1,
+        Parent = notif
+    })
+    Create("TextLabel", {
+        Name = "Message",
+        Text = message,
+        TextColor3 = theme.TextDimmed,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextWrapped = true,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -30, 0, 30),
+        Position = UDim2.new(0, 15, 0, 34),
+        TextTransparency = 1,
+        Parent = notif
+    })
+    local progressBar = Create("Frame", {
+        Name = "Progress",
+        BackgroundColor3 = notifColor,
+        Size = UDim2.new(1, 0, 0, 2),
+        Position = UDim2.new(0, 0, 1, -2),
+        BorderSizePixel = 0,
+        BackgroundTransparency = 1,
+        Parent = notif
+    })
+    Tween(notif, {Size = UDim2.new(1, 0, 0, 70), BackgroundTransparency = 0}, 0.4, Enum.EasingStyle.Back)
+    task.delay(0.1, function()
+        Tween(notifGlow, {ImageTransparency = 0.8}, 0.3)
+        Tween(notif:FindFirstChild("Title"), {TextTransparency = 0}, 0.3)
+        Tween(notif:FindFirstChild("Message"), {TextTransparency = 0}, 0.4)
+        Tween(progressBar, {BackgroundTransparency = 0}, 0.3)
+    end)
+    task.delay(0.4, function()
+        notif.ClipsDescendants = false 
+        Tween(progressBar, {Size = UDim2.new(0, 0, 0, 2)}, duration - 0.4, Enum.EasingStyle.Linear)
+    end)
+    task.delay(duration, function()
+        notif.ClipsDescendants = true 
+        Tween(notifGlow, {ImageTransparency = 1}, 0.2)
+        Tween(notif:FindFirstChild("Title"), {TextTransparency = 1}, 0.2)
+        Tween(notif:FindFirstChild("Message"), {TextTransparency = 1}, 0.2)
+        Tween(notif, {Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1}, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+        task.wait(0.5)
+        notif:Destroy()
+    end)
+end
+function PoopGUI:SetSettingsFile(fileName)
+    self._settingsFile = fileName or "PoopGUI_Settings.json"
+end
+function PoopGUI:RegisterSetting(id, value)
+    self._settings[id] = value
+end
+function PoopGUI:GetSetting(id)
+    return self._settings[id]
+end
+function PoopGUI:SaveSettings()
+    local success, err = pcall(function()
+        if writefile then
+            local data = HttpService:JSONEncode(self._settings)
+            writefile(self._settingsFile, data)
+        end
+    end)
+    if success then
+        self:Notify("PoopGUI", "Settings saved successfully!", 2, "Success")
+    else
+        self:Notify("PoopGUI", "Failed to save: " .. tostring(err), 3, "Error")
+    end
+    return success
+end
+function PoopGUI:LoadSettings()
+    local success, err = pcall(function()
+        if readfile and isfile and isfile(self._settingsFile) then
+            local data = readfile(self._settingsFile)
+            local decoded = HttpService:JSONDecode(data)
+            for id, value in pairs(decoded) do
+                self._settings[id] = value
+            end
+        end
+    end)
+    if success then
+        self:Notify("PoopGUI", "Settings loaded!", 2, "Success")
+    else
+        self:Notify("PoopGUI", "Failed to load: " .. tostring(err), 3, "Error")
+    end
+    return success, self._settings
+end
+function PoopGUI:CreateWindow(config)
+    local title, description, themeName, windowIcon
+    if type(config) == "table" then
+        title = config.Title or config.title or "PoopGUI"
+        description = config.Description or config.description or config.Credit or config.credit or ""
+        themeName = config.Theme or config.theme or "DarkTheme"
+        windowIcon = config.Icon or config.icon or "poop"
+    elseif type(config) == "string" then
+        title = config
+        description = ""
+        themeName = "DarkTheme"
+        windowIcon = "poop"
+    else
+        title = "PoopGUI"
+        description = ""
+        themeName = "DarkTheme"
+        windowIcon = "poop"
+    end
+    if Themes[themeName] then
+        self._theme = Themes[themeName]
+        self._themeName = themeName
+    end
+    local theme = self._theme
+    local existingGui = CoreGui:FindFirstChild("PoopGUI_Main")
+    if existingGui then existingGui:Destroy() end
+    local ScreenGui = Create("ScreenGui", {
+        Name = "PoopGUI_Main",
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+        ResetOnSpawn = false,
+        Parent = CoreGui
+    })
+    local Backdrop = Create("Frame", {
+        Name = "Backdrop",
+        BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, 0),
+        ZIndex = 0,
+        Parent = ScreenGui
+    })
+    local Splash = Create("Frame", {
+        Name = "Splash",
+        BackgroundColor3 = theme.Background,
+        Size = UDim2.new(0, 280, 0, 210),
+        Position = UDim2.new(0.5, -140, 0.5, -105),
+        BackgroundTransparency = 1,
+        Parent = ScreenGui
+    })
+    AddCorner(Splash, 16)
+    AddStroke(Splash, theme.Accent, 1.5, 0.4)
+    AddShadow(Splash)
+    local SplashIcon = Create("Frame", {
+        Name = "Icon",
+        BackgroundColor3 = theme.Accent,
+        Size = UDim2.new(0, 50, 0, 50),
+        Position = UDim2.new(0.5, -25, 0, 30),
+        BackgroundTransparency = 1,
+        Parent = Splash
+    })
+    AddCorner(SplashIcon, 14)
+    local SplashIconElement = CreateIconElement(SplashIcon, windowIcon or "poop", UDim2.new(0, 32, 0, 32), UDim2.new(0.5, -16, 0.5, -16), Color3.fromRGB(255, 255, 255))
+    SplashIconElement.Name = "IconElement"
+    if SplashIconElement:IsA("ImageLabel") then
+        SplashIconElement.ImageTransparency = 1
+    else
+        SplashIconElement.TextTransparency = 1
+    end
+    local SplashTitle = Create("TextLabel", {
+        Name = "Title",
+        Text = title,
+        TextColor3 = theme.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 20,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 25),
+        Position = UDim2.new(0, 0, 0, 95),
+        TextTransparency = 1,
+        Parent = Splash
+    })
+    local SplashDesc = Create("TextLabel", {
+        Name = "Desc",
+        Text = description,
+        TextColor3 = theme.TextDimmed,
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 18),
+        Position = UDim2.new(0, 0, 0, 120),
+        TextTransparency = 1,
+        Parent = Splash
+    })
+    local SplashStatus = Create("TextLabel", {
+        Name = "Status",
+        Text = "Initializing...",
+        TextColor3 = theme.TextMuted,
+        Font = Enum.Font.Gotham,
+        TextSize = 11,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 16),
+        Position = UDim2.new(0, 0, 0, 148),
+        TextTransparency = 1,
+        Parent = Splash
+    })
+    local ThemeBadge = Create("TextLabel", {
+        Name = "ThemeBadge",
+        Text = "Theme: " .. (theme.Name or themeName),
+        TextColor3 = theme.Accent,
+        Font = Enum.Font.GothamBold,
+        TextSize = 10,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 0, 14),
+        Position = UDim2.new(0, 0, 0, 138),
+        TextTransparency = 1,
+        Parent = Splash
+    })
+    local LoadBarBg = Create("Frame", {
+        Name = "LoadBarBg",
+        BackgroundColor3 = theme.TertiaryBackground,
+        Size = UDim2.new(0.7, 0, 0, 4),
+        Position = UDim2.new(0.15, 0, 0, 175),
+        BackgroundTransparency = 1,
+        Parent = Splash
+    })
+    AddCorner(LoadBarBg, 2)
+    local LoadBarFill = Create("Frame", {
+        Name = "Fill",
+        BackgroundColor3 = theme.Accent,
+        Size = UDim2.new(0, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Parent = LoadBarBg
+    })
+    AddCorner(LoadBarFill, 2)
+    local LoadBarGlow = AddGlow(LoadBarFill, theme.Accent, 10)
+    LoadBarGlow.ImageTransparency = 1
+    local MainContainer = Create("Frame", {
+        Name = "MainContainer",
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 600, 0, 420),
+        Position = UDim2.new(0.5, -300, 0.5, -210),
+        Visible = false,
+        Parent = ScreenGui
+    })
+    local MainFrame = Create("Frame", {
+        Name = "MainFrame",
+        BackgroundColor3 = theme.Background,
+        Size = UDim2.new(1, 0, 1, 0), 
+        Position = UDim2.new(0, 0, 0, 0),
+        ClipsDescendants = true,
+        Parent = MainContainer
+    })
+    AddCorner(MainFrame, 14)
+    AddStroke(MainFrame, theme.Divider, 1, 0.2)
+    AddShadow(MainContainer) 
+    local mainGlow = AddGlow(MainContainer, theme.Accent, 40) 
+    mainGlow.ImageTransparency = 0.92
+    PulseGlow(mainGlow, 0.88, 0.96, 3)
+    task.spawn(function()
+        Tween(Backdrop, {BackgroundTransparency = 0.6}, 0.4)
+        Tween(Splash, {BackgroundTransparency = 0}, 0.3)
+        task.wait(0.1)
+        Tween(SplashIcon, {BackgroundTransparency = 0, Rotation = 360}, 0.5, Enum.EasingStyle.Back)
+        if SplashIconElement:IsA("ImageLabel") then
+            Tween(SplashIconElement, {ImageTransparency = 0}, 0.4)
+        else
+            Tween(SplashIconElement, {TextTransparency = 0}, 0.4)
+        end
+        task.wait(0.3)
+        Tween(SplashTitle, {TextTransparency = 0}, 0.3)
+        task.wait(0.15)
+        Tween(SplashDesc, {TextTransparency = 0}, 0.25)
+        task.wait(0.1)
+        Tween(ThemeBadge, {TextTransparency = 0}, 0.2)
+        Tween(SplashStatus, {TextTransparency = 0}, 0.2)
+        Tween(LoadBarBg, {BackgroundTransparency = 0}, 0.2)
+        Tween(LoadBarFill, {BackgroundTransparency = 0}, 0.2)
+        Tween(LoadBarGlow, {ImageTransparency = 0.7}, 0.2)
+        task.wait(0.1)
+        local loadSteps = {
+            {progress = 0.2, text = "Loading modules...", wait = 0.25},
+            {progress = 0.4, text = "Applying " .. (theme.Name or themeName) .. " theme...", wait = 0.2},
+            {progress = 0.65, text = "Building interface...", wait = 0.2},
+            {progress = 0.85, text = "Loading icons...", wait = 0.15},
+            {progress = 1.0, text = "Ready!", wait = 0.15},
+        }
+        for _, step in ipairs(loadSteps) do
+            Tween(LoadBarFill, {Size = UDim2.new(step.progress, 0, 1, 0)}, 0.25, Enum.EasingStyle.Quad)
+            SplashStatus.Text = step.text
+            task.wait(step.wait)
+        end
+        task.wait(0.3)
+        Tween(SplashIcon, {Rotation = 720}, 0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        Tween(Splash, {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 200, 0, 150),
+            Position = UDim2.new(0.5, -100, 0.5, -75),
+        }, 0.5, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+        Tween(SplashTitle, {TextTransparency = 1}, 0.2)
+        Tween(SplashDesc, {TextTransparency = 1}, 0.2)
+        Tween(SplashStatus, {TextTransparency = 1}, 0.2)
+        Tween(ThemeBadge, {TextTransparency = 1}, 0.2)
+        if SplashIconElement:IsA("ImageLabel") then
+            Tween(SplashIconElement, {ImageTransparency = 1}, 0.3)
+        else
+            Tween(SplashIconElement, {TextTransparency = 1}, 0.3)
+        end
+        Tween(LoadBarBg, {BackgroundTransparency = 1}, 0.2)
+        Tween(LoadBarFill, {BackgroundTransparency = 1}, 0.2)
+        Tween(LoadBarGlow, {ImageTransparency = 1}, 0.2)
+        task.wait(0.5)
+        Splash:Destroy()
+        Tween(Backdrop, {BackgroundTransparency = 0.85}, 0.3)
+        task.delay(0.8, function()
+            Tween(Backdrop, {BackgroundTransparency = 1}, 0.5)
+        end)
+        MainContainer.Visible = true
+        MainContainer.Size = UDim2.new(0, 30, 0, 30)
+        MainContainer.Position = UDim2.new(0.5, -15, 0.5, -15)
+        MainContainer.BackgroundTransparency = 0.5
+        MainContainer.Rotation = -5
+        Tween(MainContainer, {
+            Size = UDim2.new(0, 600, 0, 420),
+            Position = UDim2.new(0.5, -300, 0.5, -210),
+            BackgroundTransparency = 0,
+            Rotation = 0,
+        }, 0.6, Enum.EasingStyle.Back)
+        task.delay(0.6, function()
+            Window._loaded = true 
+        end)
+        task.delay(0.4, function()
+            PoopGUI:Notify("PoopGUI", "Loaded with " .. (theme.Name or themeName) .. " theme! RightShift to toggle.", 3, "Success")
+        end)
+    end)
+    local TitleBar = Create("Frame", {
+        Name = "TitleBar",
+        BackgroundColor3 = theme.SecondaryBackground,
+        Size = UDim2.new(1, 0, 0, 44),
+        BorderSizePixel = 0,
+        Parent = MainFrame
+    })
+    AddCorner(TitleBar, 14)
+    Create("Frame", {
+        Name = "BottomFix",
+        BackgroundColor3 = theme.SecondaryBackground,
+        Size = UDim2.new(1, 0, 0, 16),
+        Position = UDim2.new(0, 0, 1, -16),
+        BorderSizePixel = 0,
+        Parent = TitleBar
+    })
+    MakeDraggable(MainContainer, TitleBar)
+    local IconHolder = Create("Frame", {
+        Name = "Icon",
+        BackgroundColor3 = theme.Accent,
+        Size = UDim2.new(0, 28, 0, 28),
+        Position = UDim2.new(0, 12, 0.5, -14),
+        Parent = TitleBar
+    })
+    AddCorner(IconHolder, 8)
+    local iconGlow = AddGlow(IconHolder, theme.Accent, 12)
+    iconGlow.ImageTransparency = 0.7
+    PulseGlow(iconGlow, 0.6, 0.85, 2)
+    local windowIconElement = CreateIconElement(IconHolder, windowIcon or "poop", UDim2.new(0, 16, 0, 16), UDim2.new(0.5, -8, 0.5, -8), Color3.fromRGB(255, 255, 255))
+    windowIconElement.Name = "IconElement"
+    Create("TextLabel", {
+        Name = "Title",
+        Text = title,
+        TextColor3 = theme.Text,
+        Font = Enum.Font.GothamBold,
+        TextSize = 15,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 200, 1, 0),
+        Position = UDim2.new(0, 50, 0, 0),
+        Parent = TitleBar
+    })
+    if description ~= "" then
+        Create("TextLabel", {
+            Name = "Description",
+            Text = description,
+            TextColor3 = theme.TextMuted,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 250, 1, 0),
+            Position = UDim2.new(0, 50 + (#title * 9) + 10, 0, 1),
+            Parent = TitleBar
+        })
+    end
+    local CloseBtn = Create("TextButton", {
+        Name = "Close",
+        Text = "✕",
+        TextColor3 = theme.TextDimmed,
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        BackgroundColor3 = theme.Danger,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 44, 0, 30),
+        Position = UDim2.new(1, -50, 0.5, -15),
+        AutoButtonColor = false,
+        Parent = TitleBar
+    })
+    AddCorner(CloseBtn, 8)
+    CloseBtn.MouseEnter:Connect(function()
+        Tween(CloseBtn, {TextColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 0}, 0.25)
+    end)
+    CloseBtn.MouseLeave:Connect(function()
+        Tween(CloseBtn, {TextColor3 = theme.TextDimmed, BackgroundTransparency = 1}, 0.25)
+    end)
+    CloseBtn.MouseButton1Click:Connect(function()
+        if not Window._loaded then return end
+        ShakeEffect(MainContainer, 3, 0.15)
+        task.wait(0.15)
+        Tween(MainContainer, {Rotation = 8, Size = UDim2.new(0,300,0,210), Position = UDim2.new(0.5,-150,0.5,-105), BackgroundTransparency = 0.3}, 0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        task.wait(0.25)
+        Tween(MainContainer, {Rotation = -3, Size = UDim2.new(0,50,0,50), Position = UDim2.new(0.5,-25,0.5,-25), BackgroundTransparency = 1}, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+        task.wait(0.35)
+        ScreenGui:Destroy()
+    end)
+    local MinBtn = Create("TextButton", {
+        Name = "Minimize",
+        Text = "─",
+        TextColor3 = theme.TextDimmed,
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        BackgroundColor3 = theme.Warning,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 44, 0, 30),
+        Position = UDim2.new(1, -98, 0.5, -15),
+        AutoButtonColor = false,
+        Parent = TitleBar
+    })
+    AddCorner(MinBtn, 8)
+    MinBtn.MouseEnter:Connect(function()
+        Tween(MinBtn, {TextColor3 = Color3.fromRGB(255,255,255), BackgroundTransparency = 0}, 0.25)
+    end)
+    MinBtn.MouseLeave:Connect(function()
+        Tween(MinBtn, {TextColor3 = theme.TextDimmed, BackgroundTransparency = 1}, 0.25)
+    end)
+    local minimized = false
+    MinBtn.MouseButton1Click:Connect(function()
+        if not Window._loaded then return end
+        minimized = not minimized
+        if minimized then
+            Tween(MainContainer, {Size = UDim2.new(0, 600, 0, 44)}, 0.4, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+            MinBtn.Text = "□"
+        else
+            Tween(MainContainer, {Size = UDim2.new(0, 600, 0, 420)}, 0.5, Enum.EasingStyle.Back)
+            MinBtn.Text = "─"
+        end
+    end)
+    Create("Frame", {
+        Name = "Divider",
+        BackgroundColor3 = theme.Divider,
+        Size = UDim2.new(1, 0, 0, 1),
+        Position = UDim2.new(0, 0, 0, 44),
+        BorderSizePixel = 0,
+        Parent = MainFrame
+    })
+    local Sidebar = Create("Frame", {
+        Name = "Sidebar",
+        BackgroundColor3 = theme.SecondaryBackground,
+        Size = UDim2.new(0, 160, 1, -45),
+        Position = UDim2.new(0, 0, 0, 45),
+        BorderSizePixel = 0,
+        Parent = MainFrame
+    })
+    local TabList = Create("ScrollingFrame", {
+        Name = "TabList",
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, -10),
+        Position = UDim2.new(0, 0, 0, 5),
+        ScrollBarThickness = 2,
+        ScrollBarImageColor3 = theme.Accent,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        AutomaticCanvasSize = Enum.AutomaticSize.Y,
+        BorderSizePixel = 0,
+        Parent = Sidebar
+    })
+    AddPadding(TabList, 6, 8, 6, 8)
+    Create("UIListLayout", {
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 4),
+        Parent = TabList
+    })
+    Create("Frame", {
+        Name = "SidebarDivider",
+        BackgroundColor3 = theme.Divider,
+        Size = UDim2.new(0, 1, 1, -45),
+        Position = UDim2.new(0, 160, 0, 45),
+        BorderSizePixel = 0,
+        Parent = MainFrame
+    })
+    local ContentArea = Create("Frame", {
+        Name = "ContentArea",
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -161, 1, -45),
+        Position = UDim2.new(0, 161, 0, 45),
+        ClipsDescendants = true,
+        Parent = MainFrame
+    })
+    local Window = {}
+    Window.__index = Window
+    Window._tabs = {}
+    Window._activeTab = nil
+    Window._theme = theme
+    function Window:CreateTab(tabName, icon)
+        tabName = tabName or "Tab"
+        local TabButton = Create("TextButton", {
+            Name = tabName .. "_TabBtn",
+            BackgroundColor3 = theme.TertiaryBackground,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 0, 38),
+            BorderSizePixel = 0,
+            Text = "",
+            AutoButtonColor = false,
+            Parent = TabList
+        })
+        AddCorner(TabButton, 8)
+        local textOffset = 12
+        if icon then
+            local iconElement = CreateIconElement(TabButton, icon, UDim2.new(0, 18, 0, 18), UDim2.new(0, 10, 0.5, -9), theme.TextDimmed)
+            iconElement.Name = "Icon"
+            textOffset = 34
+        end
+        local TabLabel = Create("TextLabel", {
+            Name = "Label",
+            Text = tabName,
+            TextColor3 = theme.TextDimmed,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 13,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, -textOffset - 8, 1, 0),
+            Position = UDim2.new(0, textOffset, 0, 0),
+            Parent = TabButton
+        })
+        local Indicator = Create("Frame", {
+            Name = "Indicator",
+            BackgroundColor3 = theme.Accent,
+            Size = UDim2.new(0, 3, 0, 0),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            AnchorPoint = Vector2.new(0, 0.5),
+            BorderSizePixel = 0,
+            Parent = TabButton
+        })
+        AddCorner(Indicator, 2)
+        local tabGlow = AddGlow(TabButton, theme.Accent, 8)
+        tabGlow.ImageTransparency = 1
+        local TabPage = Create("ScrollingFrame", {
+            Name = tabName .. "_Page",
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 1, 0),
+            Visible = false,
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = theme.Accent,
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            BorderSizePixel = 0,
+            Parent = ContentArea
+        })
+        AddPadding(TabPage, 12, 14, 12, 14)
+        Create("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 8),
+            Parent = TabPage
+        })
+        local tabData = {
+            Button = TabButton,
+            Label = TabLabel,
+            Indicator = Indicator,
+            Glow = tabGlow,
+            Page = TabPage,
+            Icon = TabButton:FindFirstChild("Icon"),
+            Name = tabName
+        }
+        table.insert(self._tabs, tabData)
+        TabButton.MouseButton1Click:Connect(function()
+            self:_selectTab(tabData)
+        end)
+        TabButton.MouseEnter:Connect(function()
+            if self._activeTab ~= tabData then
+                Tween(TabButton, {BackgroundTransparency = 0.5}, 0.2)
+                Tween(tabGlow, {ImageTransparency = 0.9}, 0.2)
+            end
+        end)
+        TabButton.MouseLeave:Connect(function()
+            if self._activeTab ~= tabData then
+                Tween(TabButton, {BackgroundTransparency = 1}, 0.2)
+                Tween(tabGlow, {ImageTransparency = 1}, 0.2)
+            end
+        end)
+        if #self._tabs == 1 then
+            self:_selectTab(tabData)
+        end
+        local Tab = {}
+        Tab.__index = Tab
+        setmetatable(Tab, {__index = PoopGUI})
+        function Tab:CreateLabel(text, icon)
+            local LabelFrame = Create("Frame", {
+                Name = "Label",
+                BackgroundColor3 = theme.TertiaryBackground,
+                BackgroundTransparency = 0,
+                Size = UDim2.new(1, 0, 0, 36), 
+                Parent = TabPage
+            })
+            AddCorner(LabelFrame, 8)
+            AddStroke(LabelFrame, theme.Divider, 1, 0.6)
+            local xOffset = 12
+            if icon then
+                CreateIconElement(LabelFrame, icon,
+                    UDim2.new(0, 16, 0, 16),
+                    UDim2.new(0, 12, 0.5, -8),
+                    theme.Accent
+                )
+                xOffset = 36
+            end
+            local labelText = Create("TextLabel", {
+                Name = "Text",
+                Text = text,
+                TextColor3 = theme.Text,
+                Font = Enum.Font.GothamBold,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -xOffset - 12, 1, 0),
+                Position = UDim2.new(0, xOffset, 0, 0),
+                Parent = LabelFrame
+            })
+            local labelObj = {}
+            function labelObj:Set(newText)
+                labelText.Text = newText
+            end
+            function labelObj:Get()
+                return labelText.Text
+            end
+            return labelObj
+        end
+        function Tab:CreateParagraph(titleText, bodyText)
+            local ParagraphFrame = Create("Frame", {
+                Name = "Paragraph",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 0),  
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Parent = TabPage
+            })
+            AddCorner(ParagraphFrame, 8)
+            local pStroke = AddStroke(ParagraphFrame, theme.Divider, 1, 0.6)
+            Create("Frame", {
+                Name = "AccentBar",
+                BackgroundColor3 = theme.Accent,
+                Size = UDim2.new(0, 3, 1, -8),
+                Position = UDim2.new(0, 6, 0, 4),
+                BorderSizePixel = 0,
+                Parent = ParagraphFrame
+            })
+            local pTitle = Create("TextLabel", {
+                Name = "Title",
+                Text = titleText or "Title",
+                TextColor3 = theme.Text,
+                Font = Enum.Font.GothamBold,
+                TextSize = 14,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -30, 0, 20),
+                Position = UDim2.new(0, 18, 0, 8),
+                Parent = ParagraphFrame
+            })
+            local pBody = Create("TextLabel", {
+                Name = "Body",
+                Text = bodyText or "",
+                TextColor3 = theme.TextDimmed,
+                Font = Enum.Font.Gotham,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextYAlignment = Enum.TextYAlignment.Top,
+                TextWrapped = true,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -30, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Position = UDim2.new(0, 18, 0, 30),
+                Parent = ParagraphFrame
+            })
+            Create("Frame", {
+                Name = "BottomPad",
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 10),
+                LayoutOrder = 999,
+                Parent = ParagraphFrame
+            })
+            local paragraphObj = {}
+            function paragraphObj:SetTitle(text)
+                pTitle.Text = text
+            end
+            function paragraphObj:SetBody(text)
+                pBody.Text = text
+            end
+            function paragraphObj:GetTitle()
+                return pTitle.Text
+            end
+            function paragraphObj:GetBody()
+                return pBody.Text
+            end
+            return paragraphObj
+        end
+        function Tab:CreateSection(sectionName)
+            local Section = Create("Frame", {
+                Name = sectionName .. "_Section",
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 28),
+                Parent = TabPage
+            })
+            Create("TextLabel", {
+                Name = "SectionLabel",
+                Text = string.upper(sectionName),
+                TextColor3 = theme.TextMuted,
+                Font = Enum.Font.GothamBold,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Position = UDim2.new(0, 4, 0, 0),
+                Parent = Section
+            })
+            Create("Frame", {
+                Name = "Line",
+                BackgroundColor3 = theme.Divider,
+                Size = UDim2.new(1, -90, 0, 1),
+                Position = UDim2.new(0, 85, 0.5, 0),
+                BorderSizePixel = 0,
+                Parent = Section
+            })
+            return Section
+        end
+        function Tab:CreateButton(name, description, callback, icon)
+            callback = callback or function() end
+            local ButtonFrame = Create("Frame", {
+                Name = name .. "_Button",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 44),
+                Parent = TabPage
+            })
+            AddCorner(ButtonFrame, 8)
+            local btnStroke = AddStroke(ButtonFrame, theme.Divider, 1, 0.6)
+            local btnGlow = AddGlow(ButtonFrame, theme.Accent, 10)
+            btnGlow.ImageTransparency = 1
+            local nameOffset = 14
+            if icon then
+                CreateIconElement(ButtonFrame, icon,
+                    UDim2.new(0, 18, 0, 18),
+                    UDim2.new(0, 12, 0, description and 6 or 13),
+                    theme.TextDimmed
+                )
+                nameOffset = 36
+            end
+            Create("TextLabel", {
+                Name = "Name",
+                Text = name,
+                TextColor3 = theme.Text,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -100, 0, 20),
+                Position = UDim2.new(0, nameOffset, 0, description and 5 or 12),
+                Parent = ButtonFrame
+            })
+            if description then
+                Create("TextLabel", {
+                    Name = "Description",
+                    Text = description,
+                    TextColor3 = theme.TextMuted,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, -100, 0, 14),
+                    Position = UDim2.new(0, nameOffset, 0, 25),
+                    Parent = ButtonFrame
+                })
+            end
+            local Btn = Create("TextButton", {
+                Name = "Activate",
+                Text = "Run",
+                TextColor3 = Color3.fromRGB(255, 255, 255),
+                Font = Enum.Font.GothamBold,
+                TextSize = 12,
+                BackgroundColor3 = theme.Accent,
+                Size = UDim2.new(0, 72, 0, 30),
+                Position = UDim2.new(1, -84, 0.5, -15),
+                AutoButtonColor = false,
+                Parent = ButtonFrame
+            })
+            AddCorner(Btn, 6)
+            RippleEffect(Btn)
+            Btn.MouseEnter:Connect(function()
+                Tween(Btn, {BackgroundColor3 = theme.AccentLight, Size = UDim2.new(0,76,0,32), Position = UDim2.new(1,-86,0.5,-16)}, 0.2, Enum.EasingStyle.Back)
+                Tween(btnGlow, {ImageTransparency = 0.88}, 0.2)
+                Tween(btnStroke, {Transparency = 0.2, Color = theme.Accent}, 0.2)
+            end)
+            Btn.MouseLeave:Connect(function()
+                Tween(Btn, {BackgroundColor3 = theme.Accent, Size = UDim2.new(0,72,0,30), Position = UDim2.new(1,-84,0.5,-15)}, 0.2)
+                Tween(btnGlow, {ImageTransparency = 1}, 0.2)
+                Tween(btnStroke, {Transparency = 0.6, Color = theme.Divider}, 0.2)
+            end)
+            Btn.MouseButton1Click:Connect(function()
+                Tween(Btn, {BackgroundColor3 = theme.Success}, 0.1)
+                Btn.Text = "✓"
+                task.delay(0.3, function()
+                    Tween(Btn, {BackgroundColor3 = theme.Accent}, 0.2)
+                    Btn.Text = "Run"
+                end)
+                callback()
+            end)
+            return ButtonFrame
+        end
+        function Tab:CreateToggle(name, description, default, callback, saveKey)
+            default = default or false
+            callback = callback or function() end
+            if saveKey and PoopGUI._settings[saveKey] ~= nil then
+                default = PoopGUI._settings[saveKey]
+            end
+            local toggled = default
+            local ToggleFrame = Create("Frame", {
+                Name = name .. "_Toggle",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 44),
+                Parent = TabPage
+            })
+            AddCorner(ToggleFrame, 8)
+            local toggleStroke = AddStroke(ToggleFrame, theme.Divider, 1, 0.6)
+            local toggleGlow = AddGlow(ToggleFrame, theme.Toggle_On, 10)
+            toggleGlow.ImageTransparency = 1
+            Create("TextLabel", {
+                Name = "Name",
+                Text = name,
+                TextColor3 = theme.Text,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -80, 0, 20),
+                Position = UDim2.new(0, 14, 0, description and 5 or 12),
+                Parent = ToggleFrame
+            })
+            if description then
+                Create("TextLabel", {
+                    Name = "Description",
+                    Text = description,
+                    TextColor3 = theme.TextMuted,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, -80, 0, 14),
+                    Position = UDim2.new(0, 14, 0, 25),
+                    Parent = ToggleFrame
+                })
+            end
+            local ToggleBg = Create("Frame", {
+                Name = "ToggleBg",
+                BackgroundColor3 = toggled and theme.Toggle_On or theme.Toggle_Off,
+                Size = UDim2.new(0, 46, 0, 24),
+                Position = UDim2.new(1, -60, 0.5, -12),
+                Parent = ToggleFrame
+            })
+            AddCorner(ToggleBg, 12)
+            local switchGlow = AddGlow(ToggleBg, theme.Toggle_On, 12)
+            switchGlow.ImageTransparency = toggled and 0.7 or 1
+            local ToggleCircle = Create("Frame", {
+                Name = "Circle",
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                Size = UDim2.new(0, 18, 0, 18),
+                Position = toggled and UDim2.new(1, -21, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+                Parent = ToggleBg
+            })
+            AddCorner(ToggleCircle, 9)
+            AddStroke(ToggleCircle, Color3.fromRGB(0,0,0), 1, 0.7)
+            local ClickArea = Create("TextButton", {
+                Name = "ClickArea",
+                Text = "",
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Parent = ToggleFrame
+            })
+            local function updateToggle(animate)
+                local dur = animate ~= false and 0.3 or 0
+                if toggled then
+                    Tween(ToggleBg, {BackgroundColor3 = theme.Toggle_On}, dur)
+                    Tween(ToggleCircle, {Position = UDim2.new(1, -21, 0.5, -9), Size = UDim2.new(0, 18, 0, 18)}, dur, Enum.EasingStyle.Back)
+                    Tween(switchGlow, {ImageTransparency = 0.7, ImageColor3 = theme.Toggle_On}, dur)
+                    Tween(toggleGlow, {ImageTransparency = 0.9}, dur)
+                    Tween(toggleStroke, {Color = theme.Toggle_On, Transparency = 0.4}, dur)
+                else
+                    Tween(ToggleBg, {BackgroundColor3 = theme.Toggle_Off}, dur)
+                    Tween(ToggleCircle, {Position = UDim2.new(0, 3, 0.5, -9), Size = UDim2.new(0, 18, 0, 18)}, dur, Enum.EasingStyle.Back)
+                    Tween(switchGlow, {ImageTransparency = 1}, dur)
+                    Tween(toggleGlow, {ImageTransparency = 1}, dur)
+                    Tween(toggleStroke, {Color = theme.Divider, Transparency = 0.6}, dur)
+                end
+                if saveKey then PoopGUI:RegisterSetting(saveKey, toggled) end
+            end
+            ClickArea.MouseButton1Click:Connect(function()
+                toggled = not toggled
+                Tween(ToggleCircle, {Size = UDim2.new(0, 22, 0, 16)}, 0.1)
+                task.delay(0.1, function() updateToggle() end)
+                callback(toggled)
+            end)
+            ClickArea.MouseEnter:Connect(function()
+                Tween(ToggleFrame, {BackgroundColor3 = Color3.fromRGB(
+                    math.min(theme.TertiaryBackground.R * 255 + 8, 255) / 255,
+                    math.min(theme.TertiaryBackground.G * 255 + 8, 255) / 255,
+                    math.min(theme.TertiaryBackground.B * 255 + 8, 255) / 255
+                )}, 0.2)
+            end)
+            ClickArea.MouseLeave:Connect(function()
+                Tween(ToggleFrame, {BackgroundColor3 = theme.TertiaryBackground}, 0.2)
+            end)
+            if default then
+                updateToggle(false)
+                callback(default)
+            end
+            local toggleObj = {}
+            function toggleObj:Set(value)
+                toggled = value
+                updateToggle()
+                callback(toggled)
+            end
+            function toggleObj:Get()
+                return toggled
+            end
+            return toggleObj
+        end
+        function Tab:CreateDropdown(name, description, options, default, callback, saveKey)
+            if type(default) == "function" then
+                saveKey = callback
+                callback = default
+                default = options[1]
+            end
+            callback = callback or function() end
+            default = default or (options and options[1]) or ""
+            if saveKey and PoopGUI._settings[saveKey] ~= nil then
+                default = PoopGUI._settings[saveKey]
+            end
+            local selected = default
+            local opened = false
+            local DropdownFrame = Create("Frame", {
+                Name = name .. "_Dropdown",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 44),
+                ClipsDescendants = true,
+                Parent = TabPage
+            })
+            AddCorner(DropdownFrame, 8)
+            local ddStroke = AddStroke(DropdownFrame, theme.Divider, 1, 0.6)
+            local ddGlow = AddGlow(DropdownFrame, theme.Accent, 10)
+            ddGlow.ImageTransparency = 1
+            Create("TextLabel", {
+                Name = "Name",
+                Text = name,
+                TextColor3 = theme.Text,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0.5, -10, 0, 20),
+                Position = UDim2.new(0, 14, 0, description and 5 or 12),
+                Parent = DropdownFrame
+            })
+            if description then
+                Create("TextLabel", {
+                    Name = "Description",
+                    Text = description,
+                    TextColor3 = theme.TextMuted,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(0.5, -10, 0, 14),
+                    Position = UDim2.new(0, 14, 0, 25),
+                    Parent = DropdownFrame
+                })
+            end
+            local Arrow = Create("TextLabel", {
+                Name = "Arrow",
+                Text = "▼",
+                TextColor3 = theme.Accent,
+                Font = Enum.Font.GothamBold,
+                TextSize = 10,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 20, 0, 28),
+                Position = UDim2.new(1, -30, 0, 8),
+                Parent = DropdownFrame
+            })
+            local SelectedBtn = Create("TextButton", {
+                Name = "Selected",
+                Text = tostring(selected),
+                TextColor3 = theme.Text,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 12,
+                BackgroundColor3 = theme.Background,
+                Size = UDim2.new(0, 145, 0, 28),
+                Position = UDim2.new(1, -180, 0, 8),
+                AutoButtonColor = false,
+                Parent = DropdownFrame
+            })
+            AddCorner(SelectedBtn, 6)
+            local OptionsHolder = Create("Frame", {
+                Name = "Options",
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -20, 0, 0),
+                Position = UDim2.new(0, 10, 0, 48),
+                Parent = DropdownFrame
+            })
+            Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 3),
+                Parent = OptionsHolder
+            })
+            local optionButtons = {}
+            local function closeDropdown()
+                opened = false
+                Tween(Arrow, {Rotation = 0}, 0.3, Enum.EasingStyle.Back)
+                Tween(DropdownFrame, {Size = UDim2.new(1, 0, 0, 44)}, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+                Tween(ddGlow, {ImageTransparency = 1}, 0.2)
+                Tween(ddStroke, {Color = theme.Divider, Transparency = 0.6}, 0.2)
+            end
+            local function selectOption(optionText)
+                selected = optionText
+                SelectedBtn.Text = optionText
+                closeDropdown()
+                if saveKey then PoopGUI:RegisterSetting(saveKey, selected) end
+                callback(selected)
+            end
+            local function createOption(optionText)
+                local OptionBtn = Create("TextButton", {
+                    Name = optionText,
+                    Text = "  " .. optionText,
+                    TextColor3 = theme.TextDimmed,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    BackgroundColor3 = theme.Background,
+                    BackgroundTransparency = 0.3,
+                    Size = UDim2.new(1, 0, 0, 32),
+                    AutoButtonColor = false,
+                    Parent = OptionsHolder
+                })
+                AddCorner(OptionBtn, 6)
+                local optionIndicator = Create("Frame", {
+                    Name = "HoverBar",
+                    BackgroundColor3 = theme.Accent,
+                    Size = UDim2.new(0, 0, 0.6, 0),
+                    Position = UDim2.new(0, 0, 0.2, 0),
+                    BorderSizePixel = 0,
+                    Parent = OptionBtn
+                })
+                AddCorner(optionIndicator, 2)
+                OptionBtn.MouseEnter:Connect(function()
+                    Tween(OptionBtn, {BackgroundTransparency = 0, TextColor3 = theme.Text}, 0.15)
+                    Tween(optionIndicator, {Size = UDim2.new(0, 3, 0.6, 0)}, 0.2, Enum.EasingStyle.Back)
+                end)
+                OptionBtn.MouseLeave:Connect(function()
+                    Tween(OptionBtn, {BackgroundTransparency = 0.3, TextColor3 = theme.TextDimmed}, 0.15)
+                    Tween(optionIndicator, {Size = UDim2.new(0, 0, 0.6, 0)}, 0.15)
+                end)
+                OptionBtn.MouseButton1Click:Connect(function()
+                    selectOption(optionText)
+                end)
+                table.insert(optionButtons, OptionBtn)
+                return OptionBtn
+            end
+            for _, option in ipairs(options) do
+                createOption(option)
+            end
+            SelectedBtn.MouseButton1Click:Connect(function()
+                opened = not opened
+                if opened then
+                    local totalHeight = 44 + 8 + (#options * 35)
+                    Tween(Arrow, {Rotation = 180}, 0.3, Enum.EasingStyle.Back)
+                    Tween(DropdownFrame, {Size = UDim2.new(1, 0, 0, totalHeight)}, 0.35, Enum.EasingStyle.Back)
+                    Tween(ddGlow, {ImageTransparency = 0.9}, 0.2)
+                    Tween(ddStroke, {Color = theme.Accent, Transparency = 0.3}, 0.2)
+                else
+                    closeDropdown()
+                end
+            end)
+            local dropdownObj = {}
+            function dropdownObj:Set(value)
+                selectOption(value)
+            end
+            function dropdownObj:SetByIndex(index)
+                if options[index] then
+                    selectOption(options[index])
+                end
+            end
+            function dropdownObj:Get()
+                return selected
+            end
+            function dropdownObj:GetIndex()
+                for i, opt in ipairs(options) do
+                    if opt == selected then return i end
+                end
+                return nil
+            end
+            function dropdownObj:Refresh(newOptions, newDefault)
+                for _, btn in ipairs(optionButtons) do btn:Destroy() end
+                optionButtons = {}
+                options = newOptions
+                for _, option in ipairs(newOptions) do createOption(option) end
+                if newDefault then
+                    selected = newDefault
+                    SelectedBtn.Text = newDefault
+                end
+            end
+            function dropdownObj:AddOption(optionText)
+                table.insert(options, optionText)
+                createOption(optionText)
+            end
+            function dropdownObj:RemoveOption(optionText)
+                for i, opt in ipairs(options) do
+                    if opt == optionText then
+                        table.remove(options, i)
+                        break
+                    end
+                end
+                for i, btn in ipairs(optionButtons) do
+                    if btn.Name == optionText then
+                        btn:Destroy()
+                        table.remove(optionButtons, i)
+                        break
+                    end
+                end
+            end
+            return dropdownObj
+        end
+        function Tab:CreateColorPicker(name, description, default, callback, saveKey)
+            default = default or Color3.fromRGB(255, 0, 0)
+            callback = callback or function() end
+            if saveKey and PoopGUI._settings[saveKey] then
+                local saved = PoopGUI._settings[saveKey]
+                if type(saved) == "table" then
+                    default = Color3.fromRGB(saved.R or 255, saved.G or 0, saved.B or 0)
+                end
+            end
+            local currentColor = default
+            local opened = false
+            local ColorFrame = Create("Frame", {
+                Name = name .. "_ColorPicker",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 44),
+                ClipsDescendants = true,
+                Parent = TabPage
+            })
+            AddCorner(ColorFrame, 8)
+            local cpStroke = AddStroke(ColorFrame, theme.Divider, 1, 0.6)
+            Create("TextLabel", {
+                Name = "Name",
+                Text = name,
+                TextColor3 = theme.Text,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -80, 0, 20),
+                Position = UDim2.new(0, 14, 0, description and 5 or 12),
+                Parent = ColorFrame
+            })
+            if description then
+                Create("TextLabel", {
+                    Name = "Description",
+                    Text = description,
+                    TextColor3 = theme.TextMuted,
+                    Font = Enum.Font.Gotham,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(1, -80, 0, 14),
+                    Position = UDim2.new(0, 14, 0, 25),
+                    Parent = ColorFrame
+                })
+            end
+            local ColorPreview = Create("TextButton", {
+                Name = "Preview",
+                Text = "",
+                BackgroundColor3 = currentColor,
+                Size = UDim2.new(0, 36, 0, 24),
+                Position = UDim2.new(1, -50, 0, 10),
+                AutoButtonColor = false,
+                Parent = ColorFrame
+            })
+            AddCorner(ColorPreview, 6)
+            AddStroke(ColorPreview, theme.Divider, 1, 0.3)
+            local cpGlow = AddGlow(ColorPreview, currentColor, 10)
+            cpGlow.ImageTransparency = 0.75
+            local PickerArea = Create("Frame", {
+                Name = "PickerArea",
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -28, 0, 130),
+                Position = UDim2.new(0, 14, 0, 52),
+                Parent = ColorFrame
+            })
+            local SatValBox = Create("ImageButton", {
+                Name = "SatVal",
+                BackgroundColor3 = currentColor,
+                Size = UDim2.new(1, -35, 0, 100),
+                AutoButtonColor = false,
+                Image = "rbxassetid://4155801252",
+                Parent = PickerArea
+            })
+            AddCorner(SatValBox, 6)
+            Create("ImageLabel", {
+                Name = "DarkOverlay",
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Image = "rbxassetid://4155801252",
+                ImageColor3 = Color3.fromRGB(0, 0, 0),
+                Rotation = 270,
+                Parent = SatValBox
+            })
+            local SatValCursor = Create("Frame", {
+                Name = "Cursor",
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                Size = UDim2.new(0, 14, 0, 14),
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Parent = SatValBox
+            })
+            AddCorner(SatValCursor, 7)
+            AddStroke(SatValCursor, Color3.fromRGB(0,0,0), 2, 0)
+            local HueSlider = Create("ImageButton", {
+                Name = "HueSlider",
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                Size = UDim2.new(0, 22, 0, 100),
+                Position = UDim2.new(1, -22, 0, 0),
+                AutoButtonColor = false,
+                Image = "rbxassetid://4155801252",
+                Parent = PickerArea
+            })
+            AddCorner(HueSlider, 6)
+            Create("UIGradient", {
+                Rotation = 90,
+                Color = ColorSequence.new({
+                    ColorSequenceKeypoint.new(0, Color3.fromRGB(255,0,0)),
+                    ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255,255,0)),
+                    ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0,255,0)),
+                    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(0,255,255)),
+                    ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0,0,255)),
+                    ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255,0,255)),
+                    ColorSequenceKeypoint.new(1, Color3.fromRGB(255,0,0)),
+                }),
+                Parent = HueSlider
+            })
+            local HueCursor = Create("Frame", {
+                Name = "HueCursor",
+                BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+                Size = UDim2.new(1, 4, 0, 5),
+                Position = UDim2.new(0, -2, 0, 0),
+                AnchorPoint = Vector2.new(0, 0.5),
+                Parent = HueSlider
+            })
+            AddCorner(HueCursor, 2)
+            AddStroke(HueCursor, Color3.fromRGB(0,0,0), 1, 0)
+            local RGBLabel = Create("TextLabel", {
+                Name = "RGB",
+                Text = string.format("R: %d  G: %d  B: %d", currentColor.R*255, currentColor.G*255, currentColor.B*255),
+                TextColor3 = theme.TextDimmed,
+                Font = Enum.Font.GothamMedium,
+                TextSize = 11,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 20),
+                Position = UDim2.new(0, 0, 0, 106),
+                Parent = PickerArea
+            })
+            local hue, sat, val = Color3.toHSV(currentColor)
+            local function updateColor()
+                currentColor = Color3.fromHSV(hue, sat, val)
+                SatValBox.BackgroundColor3 = Color3.fromHSV(hue, 1, 1)
+                Tween(ColorPreview, {BackgroundColor3 = currentColor}, 0.1)
+                Tween(cpGlow, {ImageColor3 = currentColor}, 0.1)
+                SatValCursor.Position = UDim2.new(sat, 0, 1 - val, 0)
+                HueCursor.Position = UDim2.new(0, -2, hue, 0)
+                RGBLabel.Text = string.format("R: %d  G: %d  B: %d",
+                    math.floor(currentColor.R*255), math.floor(currentColor.G*255), math.floor(currentColor.B*255))
+                if saveKey then
+                    PoopGUI:RegisterSetting(saveKey, {
+                        R = math.floor(currentColor.R*255),
+                        G = math.floor(currentColor.G*255),
+                        B = math.floor(currentColor.B*255)
+                    })
+                end
+                callback(currentColor)
+            end
+            local draggingSV = false
+            local svChangedConn, svEndedConn
+            local function endDragSV()
+                draggingSV = false
+                if svChangedConn then svChangedConn:Disconnect(); svChangedConn = nil end
+                if svEndedConn then svEndedConn:Disconnect(); svEndedConn = nil end
+            end
+            SatValBox.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    draggingSV = true
+                    sat = math.clamp((input.Position.X - SatValBox.AbsolutePosition.X) / SatValBox.AbsoluteSize.X, 0, 1)
+                    val = 1 - math.clamp((input.Position.Y - SatValBox.AbsolutePosition.Y) / SatValBox.AbsoluteSize.Y, 0, 1)
+                    updateColor()
+                    if svChangedConn then svChangedConn:Disconnect() end
+                    if svEndedConn then svEndedConn:Disconnect() end
+                    svChangedConn = UserInputService.InputChanged:Connect(function(changedInput)
+                        if draggingSV and (changedInput.UserInputType == Enum.UserInputType.MouseMovement or changedInput.UserInputType == Enum.UserInputType.Touch) then
+                            sat = math.clamp((changedInput.Position.X - SatValBox.AbsolutePosition.X) / SatValBox.AbsoluteSize.X, 0, 1)
+                            val = 1 - math.clamp((changedInput.Position.Y - SatValBox.AbsolutePosition.Y) / SatValBox.AbsoluteSize.Y, 0, 1)
+                            updateColor()
+                        end
+                    end)
+                    svEndedConn = UserInputService.InputEnded:Connect(function(endedInput)
+                        if endedInput.UserInputType == Enum.UserInputType.MouseButton1 or endedInput.UserInputType == Enum.UserInputType.Touch then
+                            endDragSV()
+                        end
+                    end)
+                end
+            end)
+            local draggingHue = false
+            local hueChangedConn, hueEndedConn
+            local function endDragHue()
+                draggingHue = false
+                if hueChangedConn then hueChangedConn:Disconnect(); hueChangedConn = nil end
+                if hueEndedConn then hueEndedConn:Disconnect(); hueEndedConn = nil end
+            end
+            HueSlider.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    draggingHue = true
+                    hue = math.clamp((input.Position.Y - HueSlider.AbsolutePosition.Y) / HueSlider.AbsoluteSize.Y, 0, 1)
+                    updateColor()
+                    if hueChangedConn then hueChangedConn:Disconnect() end
+                    if hueEndedConn then hueEndedConn:Disconnect() end
+                    hueChangedConn = UserInputService.InputChanged:Connect(function(changedInput)
+                        if draggingHue and (changedInput.UserInputType == Enum.UserInputType.MouseMovement or changedInput.UserInputType == Enum.UserInputType.Touch) then
+                            hue = math.clamp((changedInput.Position.Y - HueSlider.AbsolutePosition.Y) / HueSlider.AbsoluteSize.Y, 0, 1)
+                            updateColor()
+                        end
+                    end)
+                    hueEndedConn = UserInputService.InputEnded:Connect(function(endedInput)
+                        if endedInput.UserInputType == Enum.UserInputType.MouseButton1 or endedInput.UserInputType == Enum.UserInputType.Touch then
+                            endDragHue()
+                        end
+                    end)
+                end
+            end)
+            ColorPreview.MouseButton1Click:Connect(function()
+                opened = not opened
+                if opened then
+                    Tween(ColorFrame, {Size = UDim2.new(1, 0, 0, 200)}, 0.35, Enum.EasingStyle.Back)
+                    Tween(cpStroke, {Color = currentColor, Transparency = 0.3}, 0.2)
+                    Tween(ColorPreview, {Size = UDim2.new(0, 40, 0, 28)}, 0.15, Enum.EasingStyle.Back)
+                    task.delay(0.15, function()
+                        Tween(ColorPreview, {Size = UDim2.new(0, 36, 0, 24)}, 0.15)
+                    end)
+                else
+                    Tween(ColorFrame, {Size = UDim2.new(1, 0, 0, 44)}, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+                    Tween(cpStroke, {Color = theme.Divider, Transparency = 0.6}, 0.2)
+                end
+            end)
+            updateColor()
+            local colorObj = {}
+            function colorObj:Set(color) hue, sat, val = Color3.toHSV(color); updateColor() end
+            function colorObj:Get() return currentColor end
+            return colorObj
+        end
+        function Tab:CreateSlider(name, description, min, max, default, callback, saveKey)
+            min = min or 0
+            max = max or 100
+            default = default or min
+            callback = callback or function() end
+            if saveKey and PoopGUI._settings[saveKey] ~= nil then
+                default = PoopGUI._settings[saveKey]
+            end
+            local value = default
+            local SliderFrame = Create("Frame", {
+                Name = name .. "_Slider",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 54),
+                Parent = TabPage
+            })
+            AddCorner(SliderFrame, 8)
+            AddStroke(SliderFrame, theme.Divider, 1, 0.6)
+            Create("TextLabel", {
+                Name = "Name", Text = name,
+                TextColor3 = theme.Text, Font = Enum.Font.GothamMedium, TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left, BackgroundTransparency = 1,
+                Size = UDim2.new(0.6, 0, 0, 20), Position = UDim2.new(0, 14, 0, 5),
+                Parent = SliderFrame
+            })
+            local ValueLabel = Create("TextLabel", {
+                Name = "Value", Text = tostring(value),
+                TextColor3 = theme.Accent, Font = Enum.Font.GothamBold, TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Right, BackgroundTransparency = 1,
+                Size = UDim2.new(0.4, -14, 0, 20), Position = UDim2.new(0.6, 0, 0, 5),
+                Parent = SliderFrame
+            })
+            local SliderTrack = Create("Frame", {
+                Name = "Track", BackgroundColor3 = theme.Background,
+                Size = UDim2.new(1, -28, 0, 6), Position = UDim2.new(0, 14, 0, 36),
+                Parent = SliderFrame
+            })
+            AddCorner(SliderTrack, 3)
+            local SliderFill = Create("Frame", {
+                Name = "Fill", BackgroundColor3 = theme.Accent,
+                Size = UDim2.new((value - min) / (max - min), 0, 1, 0),
+                Parent = SliderTrack
+            })
+            AddCorner(SliderFill, 3)
+            AddGlow(SliderFill, theme.Accent, 8).ImageTransparency = 0.8
+            local SliderKnob = Create("Frame", {
+                Name = "Knob", BackgroundColor3 = Color3.fromRGB(255,255,255),
+                Size = UDim2.new(0, 16, 0, 16),
+                Position = UDim2.new((value - min) / (max - min), -8, 0.5, -8),
+                Parent = SliderTrack
+            })
+            AddCorner(SliderKnob, 8)
+            AddStroke(SliderKnob, theme.Accent, 2, 0)
+            local dragging = false
+            local dragChangedConn, dragEndedConn
+            local function endDrag()
+                dragging = false
+                if dragChangedConn then dragChangedConn:Disconnect(); dragChangedConn = nil end
+                if dragEndedConn then dragEndedConn:Disconnect(); dragEndedConn = nil end
+                Tween(SliderKnob, {Size = UDim2.new(0, 16, 0, 16)}, 0.2, Enum.EasingStyle.Back)
+            end
+            local SliderInput = Create("TextButton", {
+                Name = "Input", Text = "", BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 26), Position = UDim2.new(0, 0, 0, 28),
+                Parent = SliderFrame
+            })
+            local function updateSlider(inputPos)
+                local relX = math.clamp((inputPos - SliderTrack.AbsolutePosition.X) / SliderTrack.AbsoluteSize.X, 0, 1)
+                value = math.floor(min + (max - min) * relX)
+                ValueLabel.Text = tostring(value)
+                Tween(SliderFill, {Size = UDim2.new(relX, 0, 1, 0)}, 0.05)
+                Tween(SliderKnob, {Position = UDim2.new(relX, -8, 0.5, -8)}, 0.05)
+                if saveKey then PoopGUI:RegisterSetting(saveKey, value) end
+                callback(value)
+            end
+            SliderInput.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    Tween(SliderKnob, {Size = UDim2.new(0, 20, 0, 20)}, 0.15, Enum.EasingStyle.Back)
+                    updateSlider(input.Position.X)
+                    if dragChangedConn then dragChangedConn:Disconnect() end
+                    if dragEndedConn then dragEndedConn:Disconnect() end
+                    dragChangedConn = UserInputService.InputChanged:Connect(function(changedInput)
+                        if dragging and (changedInput.UserInputType == Enum.UserInputType.MouseMovement or changedInput.UserInputType == Enum.UserInputType.Touch) then
+                            updateSlider(changedInput.Position.X)
+                        end
+                    end)
+                    dragEndedConn = UserInputService.InputEnded:Connect(function(endedInput)
+                        if endedInput.UserInputType == Enum.UserInputType.MouseButton1 or endedInput.UserInputType == Enum.UserInputType.Touch then
+                            endDrag()
+                        end
+                    end)
+                end
+            end)
+            local sliderObj = {}
+            function sliderObj:Set(v)
+                value = math.clamp(v, min, max)
+                local relX = (value - min) / (max - min)
+                ValueLabel.Text = tostring(value)
+                SliderFill.Size = UDim2.new(relX, 0, 1, 0)
+                SliderKnob.Position = UDim2.new(relX, -8, 0.5, -8)
+                callback(value)
+            end
+            function sliderObj:Get() return value end
+            return sliderObj
+        end
+        function Tab:CreateInput(name, description, placeholder, callback, saveKey)
+            placeholder = placeholder or "Enter text..."
+            callback = callback or function() end
+            local InputFrame = Create("Frame", {
+                Name = name .. "_Input",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 44),
+                Parent = TabPage
+            })
+            AddCorner(InputFrame, 8)
+            local inputStroke = AddStroke(InputFrame, theme.Divider, 1, 0.6)
+            Create("TextLabel", {
+                Name = "Name", Text = name,
+                TextColor3 = theme.Text, Font = Enum.Font.GothamMedium, TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left, BackgroundTransparency = 1,
+                Size = UDim2.new(0.45, 0, 1, 0), Position = UDim2.new(0, 14, 0, 0),
+                Parent = InputFrame
+            })
+            local TextBox = Create("TextBox", {
+                Name = "TextBox",
+                Text = (saveKey and PoopGUI._settings[saveKey]) or "",
+                PlaceholderText = placeholder,
+                PlaceholderColor3 = theme.TextMuted,
+                TextColor3 = theme.Text,
+                Font = Enum.Font.Gotham, TextSize = 12,
+                BackgroundColor3 = theme.Background,
+                Size = UDim2.new(0.5, -14, 0, 28),
+                Position = UDim2.new(0.5, 0, 0.5, -14),
+                ClearTextOnFocus = false,
+                Parent = InputFrame
+            })
+            AddCorner(TextBox, 6)
+            AddPadding(TextBox, 0, 8, 0, 8)
+            TextBox.Focused:Connect(function()
+                Tween(inputStroke, {Color = theme.Accent, Transparency = 0.2}, 0.2)
+            end)
+            TextBox.FocusLost:Connect(function()
+                Tween(inputStroke, {Color = theme.Divider, Transparency = 0.6}, 0.2)
+                if saveKey then PoopGUI:RegisterSetting(saveKey, TextBox.Text) end
+                callback(TextBox.Text)
+            end)
+            local inputObj = {}
+            function inputObj:Set(text) TextBox.Text = text; callback(text) end
+            function inputObj:Get() return TextBox.Text end
+            return inputObj
+        end
+        function Tab:CreateKeybind(name, description, default, callback, saveKey)
+            default = default or Enum.KeyCode.F
+            callback = callback or function() end
+            local currentKey = default
+            local listening = false
+            local KeybindFrame = Create("Frame", {
+                Name = name .. "_Keybind",
+                BackgroundColor3 = theme.TertiaryBackground,
+                Size = UDim2.new(1, 0, 0, 44),
+                Parent = TabPage
+            })
+            AddCorner(KeybindFrame, 8)
+            AddStroke(KeybindFrame, theme.Divider, 1, 0.6)
+            Create("TextLabel", {
+                Name = "Name", Text = name,
+                TextColor3 = theme.Text, Font = Enum.Font.GothamMedium, TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left, BackgroundTransparency = 1,
+                Size = UDim2.new(1, -100, 1, 0), Position = UDim2.new(0, 14, 0, 0),
+                Parent = KeybindFrame
+            })
+            local KeyBtn = Create("TextButton", {
+                Name = "Key", Text = tostring(currentKey.Name),
+                TextColor3 = theme.Accent, Font = Enum.Font.GothamBold, TextSize = 12,
+                BackgroundColor3 = theme.Background,
+                Size = UDim2.new(0, 72, 0, 28), Position = UDim2.new(1, -84, 0.5, -14),
+                AutoButtonColor = false, Parent = KeybindFrame
+            })
+            AddCorner(KeyBtn, 6)
+            KeyBtn.MouseButton1Click:Connect(function()
+                listening = true
+                KeyBtn.Text = "..."
+                Tween(KeyBtn, {BackgroundColor3 = theme.Accent, Size = UDim2.new(0, 76, 0, 30)}, 0.2, Enum.EasingStyle.Back)
+                Tween(KeyBtn, {TextColor3 = Color3.fromRGB(255,255,255)}, 0.2)
+            end)
+            SafeConnect(UserInputService.InputBegan, function(input, gameProcessed)
+                if listening and input.UserInputType == Enum.UserInputType.Keyboard then
+                    currentKey = input.KeyCode
+                    KeyBtn.Text = currentKey.Name
+                    listening = false
+                    Tween(KeyBtn, {BackgroundColor3 = theme.Background, Size = UDim2.new(0, 72, 0, 28)}, 0.2, Enum.EasingStyle.Back)
+                    Tween(KeyBtn, {TextColor3 = theme.Accent}, 0.2)
+                    if saveKey then PoopGUI:RegisterSetting(saveKey, currentKey.Name) end
+                elseif not listening and not gameProcessed and input.KeyCode == currentKey then
+                    callback(currentKey)
+                end
+            end)
+            local keybindObj = {}
+            function keybindObj:Set(key) currentKey = key; KeyBtn.Text = key.Name end
+            function keybindObj:Get() return currentKey end
+            return keybindObj
+        end
+        return Tab
+    end
+    function Window:_selectTab(tabData)
+        for _, tab in ipairs(self._tabs) do
+            tab.Page.Visible = false
+            Tween(tab.Button, {BackgroundTransparency = 1}, 0.2)
+            Tween(tab.Label, {TextColor3 = theme.TextDimmed}, 0.2)
+            Tween(tab.Indicator, {Size = UDim2.new(0, 3, 0, 0)}, 0.2)
+            Tween(tab.Glow, {ImageTransparency = 1}, 0.2)
+            if tab.Icon then
+                if tab.Icon:IsA("ImageLabel") then
+                    Tween(tab.Icon, {ImageColor3 = theme.TextDimmed}, 0.2)
+                elseif tab.Icon:IsA("TextLabel") then
+                    Tween(tab.Icon, {TextColor3 = theme.TextDimmed}, 0.2)
+                end
+            end
+        end
+        tabData.Page.Visible = true
+        tabData.Page.CanvasPosition = Vector2.new(0, 0)
+        tabData.Page.Position = UDim2.new(0.05, 0, 0, 0)
+        Tween(tabData.Page, {Position = UDim2.new(0, 0, 0, 0)}, 0.35, Enum.EasingStyle.Quint)
+        for _, child in ipairs(tabData.Page:GetChildren()) do
+            if child:IsA("Frame") then
+                child.BackgroundTransparency = 1
+                Tween(child, {BackgroundTransparency = 0}, 0.3)
+            end
+        end
+        Tween(tabData.Button, {BackgroundTransparency = 0.5}, 0.2)
+        Tween(tabData.Label, {TextColor3 = theme.Text}, 0.2)
+        Tween(tabData.Indicator, {Size = UDim2.new(0, 3, 0, 22)}, 0.35, Enum.EasingStyle.Back)
+        Tween(tabData.Glow, {ImageTransparency = 0.88}, 0.2)
+        if tabData.Icon then
+            if tabData.Icon:IsA("ImageLabel") then
+                Tween(tabData.Icon, {ImageColor3 = theme.Accent}, 0.2)
+            elseif tabData.Icon:IsA("TextLabel") then
+                Tween(tabData.Icon, {TextColor3 = theme.Accent}, 0.2)
+            end
+        end
+        self._activeTab = tabData
+    end
+    local guiVisible = true
+    SafeConnect(UserInputService.InputBegan, function(input, gameProcessed)
+        if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+            if not Window._loaded then return end
+            guiVisible = not guiVisible
+            if guiVisible then
+                MainContainer.Visible = true
+                MainContainer.Size = UDim2.new(0, 300, 0, 210)
+                MainContainer.BackgroundTransparency = 0.5
+                MainContainer.Rotation = -3
+                Tween(MainContainer, {Size = UDim2.new(0,600,0,420), BackgroundTransparency = 0, Rotation = 0}, 0.5, Enum.EasingStyle.Back)
+            else
+                Tween(MainContainer, {Size = UDim2.new(0,300,0,210), BackgroundTransparency = 0.5, Rotation = 3}, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+                task.delay(0.35, function() MainContainer.Visible = false end)
+            end
+        end
+    end)
+    setmetatable(Window, {__index = PoopGUI})
+    table.insert(self._windows, Window)
+    return Window
+end
+function PoopGUI:Destroy()
+    if self._connections then
+        for _, connection in ipairs(self._connections) do
+            if connection.Connected then
+                connection:Disconnect()
+            end
+        end
+        self._connections = {}
+    end
+    for _, gui in ipairs(CoreGui:GetChildren()) do
+        if gui.Name:find("PoopGUI") then gui:Destroy() end
+    end
+    self._windows = {}
+    self._settings = {}
+end
+return PoopGUI
